@@ -495,7 +495,7 @@ public class RunSimulator
 
         try
         {
-            entry.OnTryPurchaseWrapper(null).GetAwaiter().GetResult();
+            entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
             _syncCtx.Pump();
             Log($"Bought card: {entry.CreationResult.Card.GetType().Name} for {entry.Cost}g");
         }
@@ -521,7 +521,7 @@ public class RunSimulator
 
         try
         {
-            entry.OnTryPurchaseWrapper(null).GetAwaiter().GetResult();
+            entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
             _syncCtx.Pump();
             Log($"Bought relic: {entry.Model.GetType().Name} for {entry.Cost}g");
         }
@@ -547,7 +547,7 @@ public class RunSimulator
 
         try
         {
-            entry.OnTryPurchaseWrapper(null).GetAwaiter().GetResult();
+            entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
             _syncCtx.Pump();
             Log($"Bought potion: {entry.Model.GetType().Name} for {entry.Cost}g");
         }
