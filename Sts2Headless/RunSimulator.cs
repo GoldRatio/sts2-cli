@@ -595,33 +595,21 @@ public class RunSimulator
             }
         }
 
-        // For rest sites — execute the option directly
-        if (_runState?.CurrentRoom is RestSiteRoom restSiteRoom)
+        // For rest sites — use synchronizer (handles OnSelect + option list management)
+        if (_runState?.CurrentRoom is RestSiteRoom)
         {
-            var restOptions = restSiteRoom.Options;
-            if (restOptions != null && optionIndex >= 0 && optionIndex < restOptions.Count)
+            Log($"Rest site: choosing option {optionIndex}");
+            try
             {
-                var option = restOptions[optionIndex];
-                Log($"Rest site: executing option {option.OptionId}");
-                try
-                {
-                    option.OnSelect().GetAwaiter().GetResult();
-                    _syncCtx.Pump();
-                }
-                catch (Exception ex) { Log($"Rest site OnSelect: {ex.Message}"); }
+                RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex).GetAwaiter().GetResult();
+                _syncCtx.Pump();
             }
-            else
+            catch (Exception ex)
             {
-                // Fallback: try through synchronizer
-                try
-                {
-                    RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex).GetAwaiter().GetResult();
-                    _syncCtx.Pump();
-                }
-                catch (Exception ex) { Log($"Rest site sync: {ex.Message}"); }
+                Log($"Rest site ChooseLocalOption failed: {ex.Message}");
             }
-            // After rest, go to map
-            ForceToMap();
+            // Don't ForceToMap here — let DetectDecisionPoint handle it.
+            // RestSiteState will show remaining options or transition to map.
         }
 
         WaitForActionExecutor();
@@ -844,16 +832,30 @@ public class RunSimulator
         var pcs = player.PlayerCombatState;
         var combatState = CombatManager.Instance.DebugOnlyGetState();
 
-        var hand = pcs?.Hand?.Cards?.Select((c, i) => new Dictionary<string, object?>
+        var hand = pcs?.Hand?.Cards?.Select((c, i) =>
         {
-            ["index"] = i,
-            ["id"] = c.Id.ToString(),
-            ["name"] = _loc.Card(c.Id.Entry),
-            ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
-            ["type"] = c.Type.ToString(),
-            ["can_play"] = c.CanPlay(out _, out _),
-            ["target_type"] = c.TargetType.ToString(),
-            ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+            // Extract actual stat values from DynamicVars
+            var stats = new Dictionary<string, object?>();
+            try
+            {
+                foreach (var dv in c.DynamicVars.Values)
+                {
+                    stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue;
+                }
+            }
+            catch { }
+
+            return new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = c.Id.ToString(),
+                ["name"] = _loc.Card(c.Id.Entry),
+                ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                ["type"] = c.Type.ToString(),
+                ["can_play"] = c.CanPlay(out _, out _),
+                ["target_type"] = c.TargetType.ToString(),
+                ["stats"] = stats.Count > 0 ? stats : null,
+            };
         }).ToList() ?? new();
 
         var enemies = combatState?.Enemies?
@@ -954,14 +956,21 @@ public class RunSimulator
         if (_pendingCardReward == null)
             return DetectPostCombatState(player, combatRoom ?? (_runState?.CurrentRoom as CombatRoom)!);
 
-        var cards = _pendingCardReward.Cards.Select((c, i) => new Dictionary<string, object?>
+        var cards = _pendingCardReward.Cards.Select((c, i) =>
         {
-            ["index"] = i,
-            ["id"] = c.Id.ToString(),
-            ["name"] = _loc.Card(c.Id.Entry),
-            ["type"] = c.Type.ToString(),
-            ["rarity"] = c.Rarity.ToString(),
-            ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+            var stats = new Dictionary<string, object?>();
+            try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+            return new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = c.Id.ToString(),
+                ["name"] = _loc.Card(c.Id.Entry),
+                ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                ["type"] = c.Type.ToString(),
+                ["rarity"] = c.Rarity.ToString(),
+                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                ["stats"] = stats.Count > 0 ? stats : null,
+            };
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -1050,20 +1059,8 @@ public class RunSimulator
 
         if (options == null || options.Count == 0)
         {
-            // Fallback: heal 30% max HP using the proper method
-            Log("Rest site has no options, using fallback heal");
-            try
-            {
-                MegaCrit.Sts2.Core.Entities.RestSite.HealRestSiteOption.ExecuteRestSiteHeal(player, isMimicked: false)
-                    .GetAwaiter().GetResult();
-                _syncCtx.Pump();
-            }
-            catch
-            {
-                // Last resort: manual heal
-                var healAmount = (int)(player.Creature.MaxHp * 0.3m);
-                player.Creature.HealInternal(healAmount);
-            }
+            // Options empty = choice already made (synchronizer cleared them), go to map
+            Log("Rest site: options empty, proceeding to map");
             ForceToMap();
             return MapSelectState();
         }

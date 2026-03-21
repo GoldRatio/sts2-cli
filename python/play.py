@@ -111,11 +111,19 @@ def show_combat(state):
         type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta", "Status": "dim", "Curse": "dim"}.get(ctype, "reset")
         mark = c("●", "green") if playable else c("○", "dim")
         cost_str = c(str(cost), "cyan")
-        card_desc = desc(card.get("description", {}))
 
-        print(f"  {mark} [{card['index']}] {c(n(card['name']), type_color)} ({cost_str}) {c(ctype, 'dim')}"
-              + (f"  → {target}" if target == "AnyEnemy" else "")
-              + (f"  {c(card_desc, 'dim')}" if card_desc else ""))
+        # Show actual stats inline
+        stats = card.get("stats") or {}
+        stat_parts = []
+        if "damage" in stats: stat_parts.append(c(f"{stats['damage']}dmg", "red"))
+        if "block" in stats: stat_parts.append(c(f"{stats['block']}blk", "blue"))
+        for k, v in stats.items():
+            if k not in ("damage", "block"):
+                stat_parts.append(f"{v}{k}")
+        stat_str = " ".join(stat_parts)
+
+        print(f"  {mark} [{card['index']}] {c(n(card['name']), type_color)} ({cost_str}) {stat_str}"
+              + (f"  → target" if target == "AnyEnemy" else ""))
 
 def show_map(state):
     act_name = n(state.get("act_name", "?"))
@@ -143,10 +151,20 @@ def show_card_reward(state):
     for card in state.get("cards", []):
         ctype = card.get("type", "?")
         rarity = card.get("rarity", "Common")
+        cost = card.get("cost", "?")
         type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta"}.get(ctype, "reset")
         rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
         card_desc = desc(card.get("description", {}))
-        print(f"  [{card['index']}] {c(n(card['name']), type_color)} {c(rarity, rarity_color)} {c(ctype, 'dim')}")
+
+        stats = card.get("stats") or {}
+        stat_parts = []
+        if "damage" in stats: stat_parts.append(c(f"{stats['damage']}dmg", "red"))
+        if "block" in stats: stat_parts.append(c(f"{stats['block']}blk", "blue"))
+        for k, v in stats.items():
+            if k not in ("damage", "block"): stat_parts.append(f"{v}{k}")
+        stat_str = " ".join(stat_parts)
+
+        print(f"  [{card['index']}] {c(n(card['name']), type_color)} ({cost}) {c(rarity, rarity_color)} {stat_str}")
         if card_desc:
             print(f"      {c(card_desc, 'dim')}")
 
