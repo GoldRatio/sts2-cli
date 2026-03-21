@@ -21,7 +21,7 @@ P.LANG = sys.argv[1] if len(sys.argv) > 1 else "zh"
 DOTNET = P.DOTNET or os.path.expanduser("~/.dotnet-arm64/dotnet")
 PROJECT = P.PROJECT
 
-DELAY = 0.8  # seconds between actions for visual effect
+DELAY = 1.5  # seconds between actions for visual effect
 
 proc = subprocess.Popen(
     [DOTNET, "run", "--no-build", "--project", PROJECT],
@@ -44,7 +44,7 @@ def pause(s=DELAY):
 
 try:
     print(P.c("═" * 60, "bold"))
-    print(P.c("  Slay the Spire 2 — Headless CLI Demo", "bold"))
+    print(P.c(f"  {P.t('Slay the Spire 2 — Headless CLI Demo', '杀戮尖塔 2 — 终端版 Demo')}", "bold"))
     print(P.c("═" * 60, "bold"))
     pause(1.0)
 
@@ -63,9 +63,9 @@ try:
             p = state.get("player", {})
             print(f"\n{'═' * 60}")
             if victory:
-                print(f"  {P.c('胜利!', 'green')}")
+                print(f"  {P.c(P.t('VICTORY!','胜利!'), 'green')}")
             else:
-                print(f"  {P.c('战败', 'red')} Act {state.get('act')}, Floor {state.get('floor')}")
+                print(f"  {P.c(P.t('DEFEAT','战败'), 'red')} Act {state.get('act')}, Floor {state.get('floor')}")
             P.show_player(p)
             print(f"{'═' * 60}")
             break
@@ -76,7 +76,7 @@ try:
             opts = [o for o in state.get("options", []) if not o.get("is_locked")]
             if opts:
                 pick = opts[0]
-                print(f"\n{P.c('>', 'green')} 选择 [编号]: {P.c(str(pick['index']), 'yellow')}")
+                print(f"\n{P.c('>', 'green')} {P.t('Choose','选择')} [{pick['index']}]: {P.c(str(pick['index']), 'yellow')}")
                 pause()
                 state = send({"cmd": "action", "action": "choose_option",
                              "args": {"option_index": pick["index"]}})
@@ -93,7 +93,7 @@ try:
             type_icons = {"Monster": "⚔", "Elite": "💀", "Boss": "👹",
                           "RestSite": "🏕", "Shop": "🏪", "Treasure": "💎",
                           "Event": "❓", "Unknown": "❓", "Ancient": "🏛"}
-            print(f"  {P.c('可选路径:', 'bold')}")
+            print(f"  {P.c(P.t('Available paths:','可选路径:'), 'bold')}")
             for i, ch in enumerate(choices):
                 icon = type_icons.get(ch["type"], "?")
                 ntype = P.t(ch["type"], P.NODE_TYPE_ZH.get(ch["type"], ch["type"]))
@@ -101,14 +101,14 @@ try:
 
             pause()
             pick = choices[0]
-            print(f"\n{P.c('>', 'green')} 选择路径 [编号]: {P.c('0', 'yellow')}")
+            print(f"\n{P.c('>', 'green')} {P.t('Choose path:','选择路径:')} {P.c('0', 'yellow')}")
             pause()
             state = send({"cmd": "action", "action": "select_map_node",
                          "args": {"col": pick["col"], "row": pick["row"]}})
 
         elif dec == "combat_play":
             P.show_combat(state)
-            pause(0.5)
+            pause(1.0)
 
             hand = state.get("hand", [])
             energy = state.get("energy", 0)
@@ -124,12 +124,12 @@ try:
                 action_label = f"{card['index']}"
                 if card.get("target_type") == "AnyEnemy":
                     action_label += f" → 0"
-                print(f"\n{P.c('>', 'green')} 出牌: {P.c(action_label, 'yellow')}")
-                pause(0.3)
+                print(f"\n{P.c('>', 'green')} {P.t('Play:','出牌:')} {P.c(action_label, 'yellow')}")
+                pause(0.5)
                 state = send({"cmd": "action", "action": "play_card", "args": args})
             else:
-                print(f"\n{P.c('>', 'green')} {P.c('e', 'yellow')} (结束回合)")
-                pause(0.3)
+                print(f"\n{P.c('>', 'green')} {P.c('e', 'yellow')} ({P.t('end turn','结束回合')})")
+                pause(0.5)
                 state = send({"cmd": "action", "action": "end_turn"})
 
         elif dec == "card_reward":
@@ -137,7 +137,7 @@ try:
             pause()
             cards = state.get("cards", [])
             if cards:
-                print(f"\n{P.c('>', 'green')} 选择卡牌: {P.c('0', 'yellow')}")
+                print(f"\n{P.c('>', 'green')} {P.t('Pick card:','选择卡牌:')} {P.c('0', 'yellow')}")
                 pause()
                 state = send({"cmd": "action", "action": "select_card_reward",
                              "args": {"card_index": 0}})

@@ -750,31 +750,19 @@ def _render_map(map_data, choice_set=None):
 
 
 def _draw_conn(buf, from_col, to_col, W):
-    """Draw a connection character in buf from from_col to to_col."""
+    """Draw a connection between two columns on one line.
+    from_col = lower row node, to_col = upper row node.
+    Single char at midpoint: | for straight, / for up-right, \\ for up-left."""
     fc = from_col * W + W // 2
     tc = to_col * W + W // 2
     if from_col == to_col:
         if 0 <= fc < len(buf):
             buf[fc] = "|"
-    elif from_col < to_col:
-        # Going up-right: /
-        # Place characters along the path
-        mid = (fc + tc) // 2
-        if 0 <= fc < len(buf):
-            buf[fc] = "/"
-        if tc - fc > W and 0 <= mid < len(buf):
-            buf[mid] = "/"
-        if 0 <= tc < len(buf):
-            buf[tc] = "/"
     else:
-        # Going up-left: \
-        mid = (tc + fc) // 2
-        if 0 <= fc < len(buf):
-            buf[fc] = "\\"
-        if fc - tc > W and 0 <= mid < len(buf):
-            buf[mid] = "\\"
-        if 0 <= tc < len(buf):
-            buf[tc] = "\\"
+        mid = (fc + tc) // 2
+        ch = "/" if from_col < to_col else "\\"
+        if 0 <= mid < len(buf):
+            buf[mid] = ch
 
 def get_input(prompt, valid_options=None, state=None):
     """Get user input with validation. Supports meta-commands: help, map, deck, potions."""
