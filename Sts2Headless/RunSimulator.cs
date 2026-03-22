@@ -1208,6 +1208,7 @@ public class RunSimulator
                 ["can_play"] = c.CanPlay(out _, out _),
                 ["target_type"] = c.TargetType.ToString(),
                 ["stats"] = stats.Count > 0 ? stats : null,
+                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
             };
             if (starCost > 0) cardInfo["star_cost"] = starCost;
             return cardInfo;

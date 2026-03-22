@@ -411,22 +411,24 @@ def show_combat(state):
         if star_cost > 0:
             cost_str += f"+{c(f'{star_cost}⭐', 'yellow')}"
 
-        # Show damage/block inline only
+        # Show damage/block inline, plus description for non-trivial cards
         stats = card.get("stats") or {}
         stat_parts = []
         if "damage" in stats: stat_parts.append(c(f"{stats['damage']}{t('dmg','伤')}", "red"))
         if "block" in stats: stat_parts.append(c(f"{stats['block']}{t('blk','挡')}", "blue"))
         stat_str = " ".join(stat_parts)
 
+        # Show description if card has no damage/block (so effect isn't obvious from stats)
         cd_d = card_desc(card)
-        # Show resolved description for non-basic cards (cards with effects beyond just damage/block)
-        has_extra = any(k not in ("damage", "block") for k in stats)
         extra_desc = ""
-        if has_extra and cd_d:
-            # Compact: show first line of description
-            first_line = cd_d.split("\n")[-1] if "\n" in cd_d else ""
-            if first_line:
-                extra_desc = f"  {c(first_line, 'dim')}"
+        if cd_d and "damage" not in stats and "block" not in stats:
+            # No damage/block — show full description inline
+            extra_desc = f"  {c(cd_d.replace(chr(10), ' '), 'dim')}"
+        elif cd_d and any(k not in ("damage", "block") for k in stats):
+            # Has extra effects beyond damage/block — show last line
+            lines = cd_d.split("\n")
+            if len(lines) > 1:
+                extra_desc = f"  {c(lines[-1], 'dim')}"
 
         print(f"  {mark} [{card['index']}] {c(n(card['name']), type_color)} ({cost_str}) {stat_str}{extra_desc}"
               + (f"  {c('→','yellow')}" if target == "AnyEnemy" else ""))
