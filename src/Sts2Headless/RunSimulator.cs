@@ -318,13 +318,21 @@ public class RunSimulator
             }
             if (args.TryGetValue("deck", out var deckEl))
             {
+                // Remove existing cards from RunState tracking
+                foreach (var c in player.Deck.Cards.ToList())
+                    _runState.RemoveCard(c);
                 player.Deck.Clear(silent: true);
+                // Add new cards via RunState.CreateCard (sets Owner + registers)
                 foreach (var cEl in deckEl.EnumerateArray())
                 {
                     var id = cEl.GetString();
                     if (id == null) continue;
-                    var model = ModelDb.GetById<CardModel>(new ModelId("CARD", id));
-                    if (model != null) player.Deck.AddInternal(model.ToMutable(), silent: true);
+                    var canonical = ModelDb.GetById<CardModel>(new ModelId("CARD", id));
+                    if (canonical != null)
+                    {
+                        var card = _runState.CreateCard(canonical, player);
+                        player.Deck.AddInternal(card, silent: true);
+                    }
                 }
             }
             if (args.TryGetValue("potions", out var potionsEl))

@@ -156,17 +156,41 @@ class TestCombatEdgeCases:
             assert state.get("type") != "error"
 
     def test_many_cards_per_turn(self, game):
-        """Play all playable cards in a single turn without errors.
-
-        Uses starter deck — plays all Strikes/Defends/Bash until out of energy.
-        Verifies engine handles rapid card plays correctly.
-        """
+        """Play all playable cards in a single turn without errors."""
         state = game.start(seed="inf1")
         game.skip_neow(state)
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
-
         plays = 0
         for _ in range(20):
+            if state.get("decision") != "combat_play":
+                break
+            playable = [c for c in state["hand"] if c.get("can_play")
+                        and c["cost"] <= state["energy"] and c["type"] not in ("Status", "Curse")]
+            if not playable:
+                break
+            card = playable[0]
+            args = {"card_index": card["index"]}
+            if card.get("target_type") == "AnyEnemy" and state["enemies"]:
+                args["target_index"] = state["enemies"][0]["index"]
+            state = game.act("play_card", **args)
+            plays += 1
+            assert state.get("type") != "error", f"Error after {plays} plays: {state.get('message')}"
+        assert plays >= 2
+
+    def test_infinite_card_loop(self, game):
+        """Pommel Strike + Bloodletting infinite loop doesn't crash.
+
+        Pommel Strike (1e): damage + draw 1
+        Bloodletting (0e): lose HP + gain 2 energy
+        Each cycle: net +1 energy, draws next card. Truly infinite.
+        """
+        state = game.start(seed="inf2")
+        game.skip_neow(state)
+        game.set_player(hp=80, max_hp=80, deck=["POMMEL_STRIKE"] * 5 + ["BLOODLETTING"] * 5)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        plays = 0
+        for _ in range(60):
             if state.get("decision") != "combat_play":
                 break
             hand = state.get("hand", [])
@@ -183,7 +207,8 @@ class TestCombatEdgeCases:
             plays += 1
             assert state.get("type") != "error", f"Error after {plays} plays: {state.get('message')}"
 
-        assert plays >= 2, f"Expected at least 2 plays, got {plays}"
+        # With Pommel Strike + Bloodletting, should play many cards before enemy dies
+        assert plays >= 5, f"Expected infinite loop plays >= 5, got {plays}"
 
     def test_low_hp_death(self, game):
         """Player with 1 HP should die to any attack."""
