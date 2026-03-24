@@ -612,21 +612,34 @@ def show_shop(state):
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
         ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
-        print(f"  [{card['index']}] {n(card['name'])} ({t(card.get('type','?'), ctype_zh)}) — {affordable}{t('g','金')}{sale}")
+        cc = card.get("card_cost", "?")
+        print(f"  [{card['index']}] {n(card['name'])} ({cc}) {c(t(card.get('type','?'), ctype_zh), 'dim')} — {affordable}{t('g','金')}{sale}")
+        cd_desc = card_desc(card)
+        if cd_desc:
+            print(f"      {c(cd_desc, 'dim')}")
+        aug_parts = _format_upgrade_preview(card.get("stats") or {}, card.get("after_upgrade"), card.get("card_cost"))
+        if aug_parts:
+            print(f"      {c(t('upgrade:','升级:'), 'green')} {', '.join(aug_parts)}")
 
     print(f"\n  {c(t('Relics:','遗物:'), 'bold')}")
     for r in state.get("relics", []):
         if not r.get("is_stocked"): continue
         cost = r.get("cost", 0)
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
+        r_desc = desc(r.get("description", ""))
         print(f"  [r{r['index']}] {n(r['name'])} — {affordable}{t('g','金')}")
+        if r_desc:
+            print(f"      {c(r_desc, 'dim')}")
 
     print(f"\n  {c(t('Potions:','药水:'), 'bold')}")
     for p in state.get("potions", []):
         if not p.get("is_stocked"): continue
         cost = p.get("cost", 0)
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
+        p_desc = desc(p.get("description", ""))
         print(f"  [p{p['index']}] {n(p['name'])} — {affordable}{t('g','金')}")
+        if p_desc:
+            print(f"      {c(p_desc, 'dim')}")
 
     removal_cost = state.get("card_removal_cost")
     if removal_cost:

@@ -1881,20 +1881,43 @@ public class RunSimulator
         if (inv == null) { ForceToMap(); return MapSelectState(); }
 
         var cards = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries)
-            .Select((e, i) => new Dictionary<string, object?>
+            .Select((e, i) =>
             {
-                ["index"] = i,
-                ["name"] = _loc.Card(e.CreationResult?.Card?.Id.Entry ?? "?"),
-                ["type"] = e.CreationResult?.Card?.Type.ToString() ?? "?",
-                ["cost"] = e.Cost,
-                ["is_stocked"] = e.IsStocked,
-                ["on_sale"] = e.IsOnSale,
+                var card = e.CreationResult?.Card;
+                var entry = card?.Id.Entry ?? "?";
+                var stats = new Dictionary<string, object?>();
+                int cardCost = 0;
+                try
+                {
+                    if (card != null)
+                    {
+                        cardCost = card.EnergyCost?.GetResolved() ?? 0;
+                        var mutable = card.ToMutable();
+                        foreach (var dv in mutable.DynamicVars.Values)
+                            stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue;
+                    }
+                }
+                catch { }
+                return new Dictionary<string, object?>
+                {
+                    ["index"] = i,
+                    ["name"] = _loc.Card(entry),
+                    ["type"] = card?.Type.ToString() ?? "?",
+                    ["card_cost"] = cardCost,
+                    ["description"] = _loc.Bilingual("cards", entry + ".description"),
+                    ["stats"] = stats.Count > 0 ? stats : null,
+                    ["after_upgrade"] = card != null ? GetUpgradedInfo(card) : null,
+                    ["cost"] = e.Cost,
+                    ["is_stocked"] = e.IsStocked,
+                    ["on_sale"] = e.IsOnSale,
+                };
             }).ToList();
 
         var relics = inv.RelicEntries.Select((e, i) => new Dictionary<string, object?>
         {
             ["index"] = i,
             ["name"] = _loc.Relic(e.Model?.Id.Entry ?? "?"),
+            ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
         }).ToList();
@@ -1903,6 +1926,7 @@ public class RunSimulator
         {
             ["index"] = i,
             ["name"] = _loc.Potion(e.Model?.Id.Entry ?? "?"),
+            ["description"] = _loc.Bilingual("potions", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
         }).ToList();
