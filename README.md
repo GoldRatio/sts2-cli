@@ -68,7 +68,7 @@ dotnet run --project Sts2Headless/Sts2Headless.csproj
 {"cmd": "quit"}
 ```
 
-Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are bilingual (en/zh).
+Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are in English.
 
 ## Supported Characters
 
@@ -174,7 +174,7 @@ dotnet run --project Sts2Headless/Sts2Headless.csproj
 {"cmd": "quit"}
 ```
 
-每个命令返回一个 JSON decision point（`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`），所有名称都是中英双语。
+每个命令返回一个 JSON decision point（`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`），所有名称为英文。
 
 ## 架构
 

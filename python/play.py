@@ -159,36 +159,18 @@ LANG = "zh"  # "en", "zh", or "both"
 # ─── Display helpers ───
 
 def n(obj):
-    """Extract display name based on language setting."""
-    if isinstance(obj, dict):
-        if "en" in obj:
-            en = obj["en"]
-            zh = obj.get("zh")
-            if LANG == "zh" and zh:
-                return zh
-            elif LANG == "en":
-                return en
-            elif zh and zh != en:
-                return f"{en}({zh})"
-            return en
-    return str(obj)
+    """Extract display name."""
+    return str(obj) if obj is not None else "?"
 
 def short_n(obj):
-    """Short English name only."""
-    if isinstance(obj, dict) and "en" in obj:
-        return obj["en"]
-    return str(obj)
+    """Short name only."""
+    return str(obj) if obj is not None else "?"
 
 def desc(obj):
     """Extract description, strip BBCode tags, clean SmartFormat vars."""
-    if isinstance(obj, dict) and "en" in obj:
+    if obj and isinstance(obj, str):
         import re
-        if LANG == "zh" and obj.get("zh"):
-            text = obj["zh"]
-        elif LANG == "en":
-            text = obj["en"]
-        else:
-            text = obj.get("zh") or obj.get("en") or ""
+        text = obj
         text = re.sub(r'\[/?[^\]]+\]', '', text)  # strip BBCode [tags]
 
         # Handle SmartFormat expressions:
