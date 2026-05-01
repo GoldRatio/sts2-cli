@@ -486,8 +486,11 @@ def show_player(p, show_deck=False):
     for r in p.get("relics", []):
         print(f"    🔶 {relic_str(r)}")
     for pot in p.get("potions", []):
-        if pot:
+        if pot and pot.get("name"):
             print(f"    🧪 {potion_str(pot)}")
+        else:
+            p_idx = pot.get("index", "?") if pot else "?"
+            print(f"    🧪 [{p_idx}] {c(t('Empty','空'), 'dim')}")
     if show_deck:
         cards = p.get("deck", [])
         if cards:
@@ -1648,6 +1651,28 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     state = send({"cmd": "action", "action": "proceed"})
                 else:
                     state = send({"cmd": "action", "action": "take_reward", "args": {"index": int(choice)}})
+
+            elif dec == "potion_swap":
+                rew_idx = state.get("reward_index")
+                pot_name = state.get("potion_name", "Potion")
+                print(f"\n{'─' * 60}")
+                print(f"  {c(t('Potion Slots Full', '药水栏已满'), 'bold')}")
+                print(f"  {t('Swap', '交换')} {c(pot_name, 'green')} {t('with:', '与：')}")
+                show_player(state.get("player", {}))
+
+                potions = state.get("player", {}).get("potions", [])
+                # Only allow swapping with non-empty slots
+                valid = {str(p["index"]): p for p in potions if p and p.get("name")}
+                valid["p"] = None # Back/Cancel
+
+                if auto:
+                    state = send({"cmd": "action", "action": "swap_potion", "args": {"reward_index": rew_idx, "potion_index": -1}})
+                else:
+                    choice = get_input(t("Swap with potion [index] or (p)roceed to skip", "交换药水 [编号] 或 (p)继续跳过"), set(valid.keys()), state=state)
+                    if choice == "p":
+                        state = send({"cmd": "action", "action": "swap_potion", "args": {"reward_index": rew_idx, "potion_index": -1}})
+                    else:
+                        state = send({"cmd": "action", "action": "swap_potion", "args": {"reward_index": rew_idx, "potion_index": int(choice)}})
 
             elif dec == "card_reward":
                 show_card_reward(state)

@@ -389,6 +389,8 @@ public class RunSimulator
             if (_runState == null) return Error("No run in progress");
             var runState = _runState;
             Log($"EnterRoom: type={roomType} encounter={encounter} event={eventId}");
+            _rewardsProcessed = false;
+            _pendingRewards = null;
 
             AbstractRoom room;
             switch (roomType.ToLowerInvariant())
@@ -790,6 +792,8 @@ public class RunSimulator
                     return DoProceed(player);
                 case "take_reward":
                     return DoTakeReward(player, args);
+                case "swap_potion":
+                    return DoSwapPotion(player, args);
                 default:
                     return Error($"Unknown action: {action}");
             }
@@ -1104,7 +1108,6 @@ public class RunSimulator
         if (_pendingRewards != null)
         {
             _pendingRewards.Remove(_pendingCardReward);
-            if (_pendingRewards.Count == 0) _pendingRewards = null;
         }
         _pendingCardReward = null;
 
@@ -1129,7 +1132,6 @@ public class RunSimulator
             if (_pendingRewards != null)
             {
                 _pendingRewards.Remove(_pendingCardReward);
-                if (_pendingRewards.Count == 0) _pendingRewards = null;
             }
             _pendingCardReward = null;
         }
@@ -1463,15 +1465,13 @@ public class RunSimulator
             // Wait for the action to complete (heal/dig), then force transition to map.
             if (!_cardSelector.HasPending)
             {
-                Log("Rest site: option chosen (non-Smith), waiting for action then forcing to map");
-                // Give the action time to complete (heal HP, dig for relic, etc.)
+                Log("Rest site: option chosen (non-Smith), waiting for action then detecting decision");
                 WaitForActionExecutor();
                 _syncCtx.Pump();
                 Thread.Sleep(200);
                 _syncCtx.Pump();
                 WaitForActionExecutor();
-                ForceToMap();
-                return MapSelectState();
+                return DetectDecisionPoint();
             }
         }
         // For events — use EventSynchronizer
@@ -1701,7 +1701,13 @@ public class RunSimulator
         // Check if there's a pending card reward
         if (_pendingCardReward != null)
         {
-            return CardRewardState(player, _runState.CurrentRoom as CombatRoom);
+            return CardRewardState(player, _runState.CurrentRoom);
+        }
+
+        // Check for pending reward menu
+        if (_pendingRewards != null && _pendingRewards.Count > 0)
+        {
+            return RewardMenuState(player);
         }
 
         // Check if RunManager reports game over (victory)
@@ -1739,7 +1745,7 @@ public class RunSimulator
                 }
                 if (!CombatManager.Instance.IsInProgress || (player.Creature != null && player.Creature.IsDead))
                 {
-                    return DetectPostCombatState(player, combatRoom);
+                    return DetectRoomRewardsState(player, combatRoom);
                 }
 
                 // Fallback: wait longer for enemy turn to finish if it's still in progress
@@ -1749,7 +1755,7 @@ public class RunSimulator
                     Thread.Sleep(5);
                     if (CombatManager.Instance.IsPartOfPlayerTurn(_runState!.Players[0])) return CombatPlayState(player);
                     if (!CombatManager.Instance.IsInProgress || (player.Creature != null && player.Creature.IsDead))
-                        return DetectPostCombatState(player, combatRoom);
+                        return DetectRoomRewardsState(player, combatRoom);
                 }
 
                 // If still not player turn, return a 'waiting' state instead of falling back to play
@@ -1778,6 +1784,10 @@ public class RunSimulator
         // Rest site
         if (room is RestSiteRoom restRoom)
         {
+            if (restRoom.Options == null || restRoom.Options.Count == 0)
+            {
+                return DetectRoomRewardsState(player, restRoom);
+            }
             return RestSiteState(restRoom);
         }
 
@@ -2087,9 +2097,15 @@ public class RunSimulator
         return result;
     }
 
-    private Dictionary<string, object?> DetectPostCombatState(Player player, CombatRoom combatRoom)
+    private Dictionary<string, object?> DetectRoomRewardsState(Player player, AbstractRoom room)
     {
-        Log($"Post-combat: RoomType={combatRoom.RoomType}, IsPreFinished={combatRoom.IsPreFinished}");
+        if (room == null)
+        {
+            Log("DetectRoomRewardsState: room is null, forcing to map");
+            ForceToMap();
+            return MapSelectState();
+        }
+        Log($"DetectRoomRewardsState: RoomType={room.GetType().Name}, Processed={_rewardsProcessed}");
         _syncCtx.Pump();
 
         // Generate rewards manually
@@ -2098,14 +2114,14 @@ public class RunSimulator
             _goldBeforeCombat = player.Gold;
             try
             {
-                var rewardsSet = new RewardsSet(player).WithRewardsFromRoom(combatRoom);
+                var rewardsSet = new RewardsSet(player).WithRewardsFromRoom(room);
                 var rewards = rewardsSet.GenerateWithoutOffering().GetAwaiter().GetResult();
                 _syncCtx.Pump();
 
                 if (rewards != null && rewards.Count > 0)
                 {
                     _pendingRewards = rewards.ToList();
-                    return CombatRewardsState(player, combatRoom);
+                    return RewardMenuState(player);
                 }
 
                 _pendingRewards = null;
@@ -2115,7 +2131,7 @@ public class RunSimulator
 
         if (_pendingRewards != null && _pendingRewards.Count > 0)
         {
-            return CombatRewardsState(player, combatRoom);
+            return RewardMenuState(player);
         }
 
         // No more pending rewards — proceed
@@ -2123,34 +2139,35 @@ public class RunSimulator
         _pendingRewards = null;
         _rewardsProcessed = true;
 
-        // Boss → next act
-        if (combatRoom.RoomType == RoomType.Boss)
+        if (room is CombatRoom combatRoom)
         {
-            Log("Boss defeated, entering next act");
-            try
+            // Boss → next act
+            if (combatRoom.RoomType == RoomType.Boss)
             {
-                RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
-                _syncCtx.Pump();
-                if (_runState?.Map?.StartingMapPoint != null)
+                Log("Boss defeated, entering next act");
+                try
                 {
-                    RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
+                    RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
                     _syncCtx.Pump();
+                    if (_runState?.Map?.StartingMapPoint != null)
+                    {
+                        RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
+                        _syncCtx.Pump();
+                    }
+                    WaitForActionExecutor();
                 }
-                WaitForActionExecutor();
+                catch (Exception ex) { Log($"EnterNextAct: {ex.Message}"); }
             }
-            catch (Exception ex) { Log($"EnterNextAct: {ex.Message}"); }
-            return DetectDecisionPoint();
         }
 
-        // Normal → go to map
         ForceToMap();
         return MapSelectState();
     }
 
-    private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
+    private Dictionary<string, object?> CardRewardState(Player player, AbstractRoom? room)
     {
         if (_pendingCardReward == null)
-            return DetectPostCombatState(player, combatRoom ?? (_runState?.CurrentRoom as CombatRoom)!);
+            return DetectRoomRewardsState(player, room ?? _runState?.CurrentRoom!);
 
         if (_pendingCardReward.Cards == null)
         {
@@ -2187,10 +2204,10 @@ public class RunSimulator
         };
     }
 
-    private Dictionary<string, object?> CombatRewardsState(Player player, CombatRoom combatRoom)
+    private Dictionary<string, object?> RewardMenuState(Player player)
     {
         if (_pendingRewards == null || _pendingRewards.Count == 0)
-            return DetectPostCombatState(player, combatRoom);
+            return DetectRoomRewardsState(player, _runState!.CurrentRoom!);
 
         var rewards = _pendingRewards.Select((r, i) =>
         {
@@ -2203,16 +2220,16 @@ public class RunSimulator
             if (r is GoldReward gold)
             {
                 summary["name"] = "Gold";
-                summary["amount"] = GetField(gold, "_gold") ?? 0;
+                summary["amount"] = GetProperty(gold, "Amount") ?? 0;
             }
             else if (r is MegaCrit.Sts2.Core.Rewards.RelicReward rel)
             {
-                var model = GetField(rel, "_relic") as RelicModel;
+                var model = GetProperty(rel, "ClaimedRelic") as RelicModel ?? GetField(rel, "_relic") as RelicModel;
                 summary["name"] = model != null ? _loc.Relic(model.Id.Entry) : "Relic";
             }
             else if (r is MegaCrit.Sts2.Core.Rewards.PotionReward pot)
             {
-                var model = GetField(pot, "_potion") as PotionModel;
+                var model = GetProperty(pot, "Potion") as PotionModel;
                 summary["name"] = model != null ? _loc.Potion(model.Id.Entry) : "Potion";
             }
             else if (r is CardReward)
@@ -2255,12 +2272,89 @@ public class RunSimulator
             return DetectDecisionPoint();
         }
 
+        // Potion Reward Swap Logic
+        if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward pr && !player.HasOpenPotionSlots)
+        {
+            var model = GetProperty(pr, "Potion") as PotionModel;
+            Log($"Potion slots full, prompting for swap for reward {idx} ({model?.Id.Entry ?? "Potion"})");
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "potion_swap",
+                ["reward_index"] = idx,
+                ["potion_name"] = model != null ? _loc.Potion(model.Id.Entry) : "Potion",
+                ["player"] = PlayerSummary(player)
+            };
+        }
+
         try
         {
             reward.OnSelectWrapper().GetAwaiter().GetResult();
             _syncCtx.Pump();
             _pendingRewards.RemoveAt(idx);
-            if (_pendingRewards.Count == 0) _pendingRewards = null;
+        }
+        catch (Exception ex)
+        {
+            return Error($"Failed to collect reward: {ex.Message}");
+        }
+
+        return DetectDecisionPoint();
+    }
+
+    private Dictionary<string, object?> DoSwapPotion(Player player, Dictionary<string, object?>? args)
+    {
+        if (_pendingRewards == null || _pendingRewards.Count == 0)
+            return Error("No rewards pending");
+        if (args == null || !args.ContainsKey("reward_index") || !args.ContainsKey("potion_index"))
+            return Error("swap_potion requires 'reward_index' and 'potion_index'");
+
+        int rewardIdx = Convert.ToInt32(args["reward_index"]);
+        int potionIdx = Convert.ToInt32(args["potion_index"]);
+
+        if (rewardIdx < 0 || rewardIdx >= _pendingRewards.Count)
+            return Error("Invalid reward index");
+
+        // Cancel/Back
+        if (potionIdx < 0)
+        {
+            Log("Swap cancelled, returning to rewards");
+            return DetectDecisionPoint();
+        }
+
+        var reward = _pendingRewards[rewardIdx];
+        if (reward is not MegaCrit.Sts2.Core.Rewards.PotionReward)
+            return Error("Selected reward is not a potion reward");
+
+        var potionSlots = player.PotionSlots;
+        if (potionIdx >= potionSlots.Count)
+            return Error("Invalid potion slot index");
+
+        var potionToDiscard = potionSlots[potionIdx];
+        if (potionToDiscard == null)
+        {
+            // Slot is actually empty, just take the reward
+            Log($"Slot {potionIdx} is empty, collecting reward {rewardIdx} directly");
+        }
+        else
+        {
+            Log($"Swapping reward {rewardIdx} with potion in slot {potionIdx} ({potionToDiscard.Id.Entry})");
+            try
+            {
+                MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potionToDiscard).GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
+            catch (Exception ex)
+            {
+                return Error($"Failed to discard potion: {ex.Message}");
+            }
+        }
+
+        // Now take the reward
+        try
+        {
+            reward.OnSelectWrapper().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            _pendingRewards.RemoveAt(rewardIdx);
         }
         catch (Exception ex)
         {
@@ -2297,23 +2391,11 @@ public class RunSimulator
             _eventOptionChosen = false;
         }
 
-        // If event is finished, proceed to map
+        // If event is finished, check for rewards then proceed to map
         if (localEvent == null || localEvent.IsFinished)
         {
-            Log($"Event {localEvent?.GetType().Name ?? "null"} finished, proceeding");
-            try
-            {
-                RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
-                _syncCtx.Pump();
-            }
-            catch { }
-            // Force to map if still in event room
-            if (_runState?.CurrentRoom is EventRoom)
-            {
-                try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
-                catch { }
-            }
-            return _runState?.CurrentRoom is MapRoom ? MapSelectState() : DetectDecisionPoint();
+            Log($"Event {localEvent?.GetType().Name ?? "null"} finished, detecting rewards");
+            return DetectRoomRewardsState(_runState!.Players[0], eventRoom);
         }
 
         var currentOptions = localEvent.CurrentOptions;
@@ -2466,10 +2548,9 @@ public class RunSimulator
 
         if (options == null || options.Count == 0)
         {
-            // Options empty = choice already made (synchronizer cleared them), go to map
-            Log("Rest site: options empty, proceeding to map");
-            ForceToMap();
-            return MapSelectState();
+            // Options empty = choice already made (synchronizer cleared them)
+            // Fall through to rewards detection
+            return DetectRoomRewardsState(player, restRoom);
         }
 
         var optionList = options.Select((opt, i) => new Dictionary<string, object?>
@@ -2801,9 +2882,9 @@ public class RunSimulator
                     ["vars"] = vars.Count > 0 ? vars : null,
                 };
             }).ToList(),
-            ["potions"] = player.Potions?.Select((p, i) =>
+            ["potions"] = player.PotionSlots?.Select((p, i) =>
             {
-                if (p == null) return null;
+                if (p == null) return new Dictionary<string, object?> { ["index"] = i, ["name"] = null };
                 var pvars = GetDynamicVars(p?.DynamicVars);
                 return new Dictionary<string, object?>
                 {
@@ -2813,7 +2894,7 @@ public class RunSimulator
                     ["vars"] = pvars.Count > 0 ? pvars : null,
                     ["target_type"] = p.TargetType.ToString(),
                 };
-            }).Where(x => x != null).ToList(),
+            }).ToList(),
             ["deck_size"] = player.Deck?.Cards?.Count(c => c != null) ?? 0,
             ["deck"] = player.Deck?.Cards?.Where(c => c != null).Select(c =>
             {
