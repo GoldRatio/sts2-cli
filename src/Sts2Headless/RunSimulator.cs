@@ -208,6 +208,7 @@ public class RunSimulator
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
+    private Task? _pendingChoiceTask;
 
     public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null, string lang = "en")
     {
@@ -295,6 +296,7 @@ public class RunSimulator
         var field = obj.GetType().GetField(fieldName, NonPublic);
         return field?.GetValue(obj);
     }
+
 
     private static object? GetProperty(object obj, string propName)
     {
@@ -1234,24 +1236,19 @@ public class RunSimulator
         try
         {
             // Run on background thread so card selection can pause (same pattern as event options)
-            var task = Task.Run(() => removal.OnTryPurchaseWrapper(merchantRoom.Inventory));
-            for (int i = 0; i < 100; i++)
-            {
-                _syncCtx.Pump();
-                if (_cardSelector.HasPending) break;
-                if (task.IsCompleted) break;
-                Thread.Sleep(10);
-            }
+            _pendingChoiceTask = Task.Run(() => removal.OnTryPurchaseWrapper(merchantRoom.Inventory));
+            WaitForChoiceTask(_pendingChoiceTask);
+
             if (_cardSelector.HasPending)
             {
                 WaitForActionExecutor();
                 return DetectDecisionPoint();
             }
-            if (!task.IsCompleted) task.Wait(2000);
             _syncCtx.Pump();
             Log($"Removed card for {removal.Cost}g");
         }
         catch (Exception ex) { return Error($"Remove card failed: {ex.Message}"); }
+        finally { _pendingChoiceTask = null; }
 
         return DetectDecisionPoint();
     }
@@ -1296,6 +1293,14 @@ public class RunSimulator
         _cardSelector.ResolvePendingByIndices(indices);
         _syncCtx.Pump();
         WaitForActionExecutor();
+
+        // If this selection was triggered by a background task (event, shop, rest site),
+        // wait for that task to settle before detecting the next state.
+        if (_pendingChoiceTask != null && !_pendingChoiceTask.IsCompleted)
+        {
+            Log("SelectCards: waiting for parent choice task to resume...");
+            WaitForChoiceTask(_pendingChoiceTask);
+        }
 
         // Extra wait for rest-site SMITH and events: the background choice tasks
         // need time to complete transitions after card selection resolves.
@@ -1440,26 +1445,21 @@ public class RunSimulator
             try
             {
                 // Run on background thread so Smith card selection can pause
-                var task = Task.Run(() => RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex));
-                for (int i = 0; i < 100; i++)
-                {
-                    _syncCtx.Pump();
-                    if (_cardSelector.HasPending) break;
-                    if (task.IsCompleted) break;
-                    Thread.Sleep(10);
-                }
+                _pendingChoiceTask = Task.Run(() => RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex));
+                WaitForChoiceTask(_pendingChoiceTask);
+
                 if (_cardSelector.HasPending)
                 {
                     WaitForActionExecutor();
                     return DetectDecisionPoint();
                 }
-                if (!task.IsCompleted) task.Wait(2000);
                 _syncCtx.Pump();
             }
             catch (Exception ex)
             {
                 Log($"Rest site ChooseLocalOption failed: {ex.Message}");
             }
+            finally { _pendingChoiceTask = null; }
 
             // After non-Smith rest site options (HEAL, etc.), the options may not clear.
             // Wait for the action to complete (heal/dig), then force transition to map.
@@ -1491,25 +1491,14 @@ public class RunSimulator
                         _lastEventOptionCount = options.Count;
                         // Use EventSynchronizer.ChooseLocalOption for robust state transitions.
                         // Run on thread pool so GetSelectedCards/GetSelectedCardReward can block.
-                        var task = Task.Run(() => eventSync.ChooseLocalOption(optionIndex));
-                        for (int i = 0; i < 100; i++)
-                        {
-                            _syncCtx.Pump();
-                            if (_cardSelector.HasPending || _cardSelector.HasPendingReward) break;
-                            if (_pendingBundles != null) break;
-                            if (task.IsCompleted) break;
-                            Thread.Sleep(10);
-                        }
+                        _pendingChoiceTask = Task.Run(() => eventSync.ChooseLocalOption(optionIndex));
+                        WaitForChoiceTask(_pendingChoiceTask);
+
                         if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                         {
                             WaitForActionExecutor();
                             return DetectDecisionPoint();
                         }
-                        if (!task.IsCompleted) task.Wait(2000);
-                        
-                        // Extra pump and wait to allow state transitions (e.g. to combat) to start
-                        _syncCtx.Pump();
-                        Thread.Sleep(100);
                         _syncCtx.Pump();
                     }
                     catch (Exception ex) 
@@ -1517,6 +1506,7 @@ public class RunSimulator
                         Log($"Event choose: {ex.Message}"); 
                         Console.Error.WriteLine($"[ERROR] Event choice {optionIndex} failed: {ex}");
                     }
+                    finally { _pendingChoiceTask = null; }
                 }
             }
         }
@@ -1587,6 +1577,14 @@ public class RunSimulator
     {
         if (_runState == null)
             return Error("No run in progress");
+
+        // If a background choice task is still running, wait for it before detecting next state.
+        // But only if we aren't currently waiting for a card/bundle selection from that task!
+        if (_pendingChoiceTask != null && !_pendingChoiceTask.IsCompleted && !_cardSelector.HasPending && !_cardSelector.HasPendingReward && _pendingBundles == null)
+        {
+            Log("DetectDecisionPoint: waiting for background choice task...");
+            WaitForChoiceTask(_pendingChoiceTask);
+        }
 
         var room = _runState.CurrentRoom;
         Log($"DetectDecisionPoint: room={room?.GetType().Name ?? "null"} bundles={(_pendingBundles != null)} cardSelect={_cardSelector.HasPending}");
@@ -1868,6 +1866,31 @@ public class RunSimulator
                         ["type"] = child.PointType.ToString(),
                     })
                     .ToList();
+
+                // Winged Boots interaction: allow jumping to any node in the next row if charges exist
+                var player = _runState.Players[0];
+                var wingedRelic = player.Relics?.FirstOrDefault(r => r.Id.Entry == "WINGED_BOOTS");
+                if (wingedRelic != null)
+                {
+                    var vars = GetDynamicVars(wingedRelic.DynamicVars);
+                    if (vars.TryGetValue("rooms", out var charges) && Convert.ToInt32(charges) > 0)
+                    {
+                        foreach (var node in map.GetPointsInRow(currentPoint.coord.row + 1))
+                        {
+                            if (node == null) continue;
+                            if (!choices.Any(c => (int)c["col"] == node.coord.col && (int)c["row"] == node.coord.row))
+                            {
+                                choices.Add(new Dictionary<string, object?>
+                                {
+                                    ["col"] = (int)node.coord.col,
+                                    ["row"] = (int)node.coord.row,
+                                    ["type"] = node.PointType.ToString(),
+                                    ["is_winged"] = true
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
         else
@@ -2875,11 +2898,15 @@ public class RunSimulator
             ["relics"] = player.Relics?.Select(r =>
             {
                 var vars = GetDynamicVars(r?.DynamicVars);
+                // Extract optional counter/amount (some relics use 'Amount', some 'Counter', some 'Value')
+                var counter = GetProperty(r, "Amount") ?? GetProperty(r, "Counter") ?? GetProperty(r, "Value");
+
                 return new Dictionary<string, object?>
                 {
                     ["name"] = _loc.Relic(r.Id.Entry),
                     ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
                     ["vars"] = vars.Count > 0 ? vars : null,
+                    ["counter"] = counter,
                 };
             }).ToList(),
             ["potions"] = player.PotionSlots?.Select((p, i) =>
@@ -3838,6 +3865,19 @@ public class RunSimulator
         catch (Exception ex)
         {
             Log($"CleanUp exception: {ex.Message}");
+        }
+    }
+
+    private void WaitForChoiceTask(Task? task)
+    {
+        if (task == null) return;
+        for (int i = 0; i < 200; i++) // max 2s
+        {
+            _syncCtx.Pump();
+            if (task.IsCompleted) break;
+            // If the task triggered another selection, stop waiting so we can return the decision
+            if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null) break;
+            Thread.Sleep(10);
         }
     }
 

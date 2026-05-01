@@ -457,11 +457,14 @@ def card_desc(card):
     return desc(card.get("description", {}), card.get("stats"))
 
 def relic_str(r):
-    """Format a relic with name and resolved description."""
+    """Format a relic with name, counter (if any), and resolved description."""
     if isinstance(r, dict) and "name" in r:
         name = n(r["name"])
+        counter = r.get("counter")
+        # Some relics use -1 to indicate no active counter.
+        counter_str = f" [{c(str(counter), 'yellow')}]" if counter is not None and str(counter) != "-1" else ""
         d = desc(r.get("description", {}), r.get("vars"))
-        return f"{name}" + (f": {c(d, 'dim')}" if d else "")
+        return f"{name}{counter_str}" + (f": {c(d, 'dim')}" if d else "")
     return n(r)
 
 def potion_str(p):
