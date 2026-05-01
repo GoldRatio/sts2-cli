@@ -3,6 +3,10 @@
 <details open>
 <summary><b>English</b></summary>
 
+Forked from [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli). This fork keeps the original headless CLI core but aims to add RL agent capability and fixing some bugs that exist within the original repository for that purpose.
+
+## Original Readme Start
+
 A CLI for Slay the Spire 2.
 
 Runs the real game engine headless in your terminal — all damage, card effects, enemy AI, relics, and RNG are identical to the actual game. Everything is unlocked from the start: all characters, cards, relics, potions, and ascension levels — no timeline progression required.
@@ -106,108 +110,11 @@ sts2.dll (game engine, IL patched)
 
 </details>
 
-<details>
-<summary><b>中文</b></summary>
+## Known Issues
+- Fights such as **Bygone Effigy** will freeze the game. This is likely due to some unhandled behaviour for the speech bubble system in the original game.
+- Multi-step events where don't continue after first step. ie. **Tablet Of Truth** only allows for the first choice.
+- **Bygone Effigy** doesn't stack slow after each card played. It may do this internally but doesn't display, need to check numbers explicitly
+- When selecting things like upgrade in **Rest Sites**, it allows you to multi select cards. Similar to the bug in actual gameplay funnily enough. 
 
-杀戮尖塔2的命令行版本。
-
-在终端里运行真实游戏引擎 — 所有伤害计算、卡牌效果、敌人AI、遗物触发、随机数都和真实游戏一致。所有内容从一开始就全部解锁：全角色、全卡牌、全遗物、全药水、全渐进难度等级，无需时间线进度。
-
-![demo](docs/demo_zh.gif)
-
-## 安装
-
-需要：
-- [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) (Steam)
-- [.NET 9+ SDK](https://dotnet.microsoft.com/download)
-- Python 3.9+
-
-```bash
-git clone https://github.com/wuhao21/sts2-cli.git
-cd sts2-cli
-./setup.sh      # 从 Steam 复制 DLL → IL patch → 编译
-```
-
-或者直接运行 `python3 python/play.py`，首次会自动完成 setup。
-
-## 玩
-
-```bash
-python3 python/play.py                        # 中文交互模式
-python3 python/play.py --lang en              # English
-python3 python/play.py --ascension 10         # 渐进难度 10
-python3 python/play.py --character Silent      # 选择静默猎手
-```
-
-游戏内输入 `help` 查看所有命令：
-
-```
-  help     — 帮助
-  map      — 显示地图
-  deck     — 查看牌组
-  potions  — 查看药水
-  relics   — 查看遗物
-  quit     — 退出
-
-  地图:    输入编号 (0, 1, 2)
-  战斗:    输入卡牌编号 / e 结束回合 / p0 使用药水
-  奖励:    输入卡牌编号 / s 跳过
-  休息:    输入选项编号
-  事件:    输入选项编号 / leave 离开
-  商店:    c0 买卡 / r0 买遗物 / p0 买药水 / rm 移除 / leave 离开
-```
-
-## 角色支持
-
-| 角色 | 状态 |
-|---|---|
-| 铁甲战士 (Ironclad) | 完全可玩 |
-| 静默猎手 (Silent) | 完全可玩 |
-| 故障机器人 (Defect) | 完全可玩 |
-| 亡灵契约师 (Necrobinder) | 完全可玩 |
-| 储君 (Regent) | 完全可玩 |
-
-## JSON 协议
-
-除了交互模式，也可以通过 stdin/stdout JSON 协议编程控制（写 AI agent、RL 训练等）：
-
-```bash
-dotnet run --project src/Sts2Headless/Sts2Headless.csproj
-```
-
-```json
-{"cmd": "start_run", "character": "Ironclad", "seed": "test", "ascension": 0}
-{"cmd": "action", "action": "play_card", "args": {"card_index": 0, "target_index": 0}}
-{"cmd": "action", "action": "end_turn"}
-{"cmd": "action", "action": "select_map_node", "args": {"col": 3, "row": 1}}
-{"cmd": "action", "action": "skip_card_reward"}
-{"cmd": "quit"}
-```
-
-每个命令返回一个 JSON decision point（`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`），所有名称为英文。
-
-## 游戏日志
-
-每局游戏会自动记录到 `logs/` 目录下的 JSONL 文件中，包含每一步的游戏状态和操作，附带时间戳。超过 7 天的旧日志会自动清理。
-
-```bash
-python3 python/play.py --no-log    # 关闭日志
-```
-
-**提交 bug 报告时，请附上 `logs/` 中对应的日志文件** — 它包含了复现问题所需的完整游戏步骤。
-
-## 架构
-
-```
-你的代码 (Python / JS / LLM)
-    │  JSON stdin/stdout
-    ▼
-src/Sts2Headless (C#)
-    │  RunSimulator.cs
-    ▼
-sts2.dll (游戏引擎, IL patched)
-  + src/GodotStubs (替代 GodotSharp.dll)
-  + Harmony patches (本地化)
-```
-
-</details>
+## Planned Changes
+- Add support for console commands to allow for easier debugging.
