@@ -10,6 +10,7 @@
   <ItemGroup>
     <!-- Our GodotStubs (outputs as GodotSharp.dll to satisfy sts2.dll references) -->
     <ProjectReference Include="..\GodotStubs\GodotStubs.csproj" />
+    <ProjectReference Include="..\SteamworksStubs\SteamworksStubs.csproj" />
   </ItemGroup>
 
   <!-- Reference game DLL and its non-Godot dependencies -->
@@ -28,10 +29,6 @@
     </Reference>
     <Reference Include="Sentry">
       <HintPath>..\..\lib\Sentry.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Steamworks.NET">
-      <HintPath>..\..\lib\Steamworks.NET.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="MonoMod.Backports">

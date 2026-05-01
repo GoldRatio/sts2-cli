@@ -15,7 +15,8 @@ import sys
 import os
 import argparse
 import random
-from game_log import GameLogger
+from datetime import datetime
+from game_log import GameLogger, LOG_DIR
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT = os.path.join(ROOT, "src", "Sts2Headless", "Sts2Headless.csproj")
@@ -157,7 +158,7 @@ def ensure_setup():
         print("  ✓ Build succeeded")
 
 # Language setting (set by --lang flag)
-LANG = "zh"  # "en", "zh", or "both"
+LANG = "en"  # "en", "zh", or "both"
 
 # ─── Native save file support ───
 
@@ -285,8 +286,29 @@ def show_native_save(save_path):
 # ─── Display helpers ───
 
 def n(obj):
-    """Extract display name."""
+    """Extract display name, resolving localization keys if necessary."""
+    if isinstance(obj, dict):
+        if LANG == "en":
+            return obj.get("en", obj.get("zh", "?"))
+        elif LANG == "zh":
+            return obj.get("zh", obj.get("en", "?"))
+        else: # both
+            en = obj.get("en", "?")
+            zh = obj.get("zh", "?")
+            if en == zh: return en
+            return f"{en} ({zh})"
+    
+    if isinstance(obj, str) and ('.' in obj or obj.isupper()):
+        # Try resolving as a localization key (loc_resolve might be defined later, so we use it by name)
+        try:
+            resolved = globals().get('loc_resolve')(obj)
+            if resolved and resolved != obj:
+                return resolved
+        except:
+            pass
+
     return str(obj) if obj is not None else "?"
+
 
 def short_n(obj):
     """Short name only."""
@@ -294,9 +316,21 @@ def short_n(obj):
 
 def desc(obj):
     """Extract description, strip BBCode tags, clean SmartFormat vars."""
-    if obj and isinstance(obj, str):
-        import re
+    text = ""
+    if isinstance(obj, dict):
+        if LANG == "en":
+            text = obj.get("en", obj.get("zh", ""))
+        elif LANG == "zh":
+            text = obj.get("zh", obj.get("en", ""))
+        else: # both
+            en = obj.get("en", "")
+            zh = obj.get("zh", "")
+            text = en if en == zh else f"{en} ({zh})"
+    elif isinstance(obj, str):
         text = obj
+
+    if text:
+        import re
         text = re.sub(r'\[/?[^\]]+\]', '', text)  # strip BBCode [tags]
 
         # Handle SmartFormat expressions:
@@ -586,10 +620,11 @@ def show_combat(state):
         if powers:
             pw_parts = [f"{n(pw['name'])} {pw.get('amount','')}" for pw in powers]
             power_str = "  " + c(", ".join(pw_parts), "dim")
-
+ 
         print(f"  [{e['index']}] {n(e['name'])}  {bar(hp, mhp)} {hp}/{mhp}"
               + (f"  {c(str(blk), 'blue')} {t('blk','挡')}" if blk else "")
               + f"  {intent_str}{power_str}")
+
 
     print()
     hand = state.get("hand", [])
@@ -819,43 +854,76 @@ def _load_loc():
 
 def loc_resolve(key):
     """Resolve a loc key like 'NEOW.pages.INITIAL.options.PRECISE_SCISSORS.title' to readable text."""
+    if not key or not isinstance(key, str):
+        return key
     cache = _load_loc()
     # Try direct lookup in relevant tables
-    for table in ['events', 'relics', 'ancients', 'cards', 'potions', 'monsters']:
+    for table in ['events', 'relics', 'ancients', 'cards', 'potions', 'monsters', 'acts', 'powers', 'characters']:
         val_en = cache.get(f"{table}:{key}")
         val_zh = cache.get(f"{table}:{key}:zh")
         if val_en:
             return n({"en": val_en, "zh": val_zh}) if val_zh else val_en
-    # Extract meaningful part from key
+            
+    # If not found, try common suffixes if the key looks like a base key
+    if '.' not in key or not any(key.endswith(s) for s in ['.title', '.description', '.name', '.text']):
+        for suffix in ['.title', '.name', '.text']:
+            res = loc_resolve(key + suffix)
+            if res != key + suffix:
+                return res
+
+    # Extract meaningful part from key as fallback
     parts = key.split('.')
     for p in reversed(parts):
-        if p not in ('title', 'description', 'options', 'pages', 'INITIAL'):
-            relic_en = cache.get(f"relics:{p}.title")
-            relic_zh = cache.get(f"relics:{p}.title:zh")
-            desc_en = cache.get(f"relics:{p}.description", "")
-            desc_zh = cache.get(f"relics:{p}.description:zh", "")
-            if relic_en:
-                name = n({"en": relic_en, "zh": relic_zh})
-                d = desc({"en": desc_en, "zh": desc_zh})
-                return f"{name}" + (f" — {c(d, 'dim')}" if d else "")
+        if p not in ('title', 'description', 'options', 'pages', 'INITIAL', 'name', 'text'):
+            # Try resolving this specific part as a relic/card/etc. name
+            for table in ['relics', 'cards', 'potions', 'ancients']:
+                en = cache.get(f"{table}:{p}.title") or cache.get(f"{table}:{p}.name")
+                zh = cache.get(f"{table}:{p}.title:zh") or cache.get(f"{table}:{p}.name:zh")
+                if en:
+                    name = n({"en": en, "zh": zh})
+                    d_en = cache.get(f"{table}:{p}.description")
+                    d_zh = cache.get(f"{table}:{p}.description:zh")
+                    d = desc({"en": d_en, "zh": d_zh}) if d_en else ""
+                    return f"{name}" + (f" — {c(d, 'dim')}" if d else "")
             return p.replace('_', ' ').title()
     return key
+
 
 def show_event(state):
     print(f"\n{'─' * 60}")
     event_name = state.get("event_name", "?")
-    # event_name is now bilingual dict {"en": ..., "zh": ...} or plain string
-    event_display = n(event_name) if isinstance(event_name, dict) else event_name
+    # event_name is now bilingual dict {"en": ..., "zh": ...} or loc key string
+    event_display = n(event_name) if isinstance(event_name, dict) else loc_resolve(event_name)
     event_desc = state.get("description", "")
+
     # Show context
     ctx = state.get("context", {})
     if ctx:
         act = n(ctx.get("act_name", "?"))
         floor = ctx.get("floor", "?")
         print(f"  {c(act, 'dim')} {t('Floor','层')} {floor}")
+
     event_label = t("Event", "事件")
     print(f"  {c(f'{event_label}: {event_display}', 'bold')}")
-    # event_desc is usually a raw loc key — skip it (event name already in title)
+
+    # Show event description (flavor text)
+    if not event_desc:
+        # Try to resolve from event name key if it's a key
+        if isinstance(event_name, str) and '.' in event_name:
+            base = event_name.split('.title')[0] if '.title' in event_name else event_name
+            for suffix in [".description", ".pages.INITIAL.description", ".description.text"]:
+                test_key = base + suffix
+                resolved = loc_resolve(test_key)
+                if resolved and resolved != test_key:
+                    event_desc = resolved
+                    break
+
+    if event_desc:
+        resolved_desc = n(event_desc) if isinstance(event_desc, dict) else loc_resolve(event_desc)
+        # If it's just the same as title, skip it
+        if resolved_desc and resolved_desc != event_display:
+            print(f"\n  {desc(resolved_desc)}")
+
     show_player(state.get("player", {}))
     print()
     for opt in state.get("options", []):
@@ -869,6 +937,16 @@ def show_event(state):
             title = loc_resolve(raw_title) if '.' in str(raw_title) or str(raw_title).isupper() else raw_title
         # Show option description with resolved template vars
         raw_desc = opt.get("description")
+        if not raw_desc:
+            tk = opt.get("text_key")
+            if tk:
+                # Try appending .description or .text
+                for suffix in [".description", ".text"]:
+                    resolved = loc_resolve(tk + suffix)
+                    if resolved and resolved != tk + suffix:
+                        raw_desc = resolved
+                        break
+
         opt_desc = desc(raw_desc) if raw_desc else ""
         # Resolve template vars like [MaxHp], [Gold], {Cards}
         opt_vars = opt.get("vars") or {}
@@ -924,6 +1002,10 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
     width = W * total_cols + 6
     print(f"\n{'═' * width}")
     print(f"  {c(act, 'bold')} — {t('Floor','层')} {floor_n}")
+    
+    # Show player status on map
+    show_player(map_data.get("player", {}))
+    
     # Show current position if it's not on the map grid (e.g., starting row 0)
     if cur and cur.get("row", -1) not in row_numbers:
         print(f"  {c(t('You are at the start','你在起点'), 'green')}")
@@ -1137,6 +1219,12 @@ def get_input(prompt, valid_options=None, state=None):
             for r in p.get("relics", []):
                 print(f"  🔶 {relic_str(r)}")
             continue
+        if raw.startswith("enter_room "):
+            parts = raw.split()
+            rtype = parts[1]
+            enc = parts[2] if len(parts) > 2 else None
+            ev = parts[3] if len(parts) > 3 else None
+            return get_input._send({"cmd": "enter_room", "type": rtype, "encounter": enc, "event": ev})
         if raw == "map":
             # Fetch full map from CLI
             if hasattr(get_input, '_send'):
@@ -1173,9 +1261,15 @@ def get_input(prompt, valid_options=None, state=None):
                 raise KeyboardInterrupt("abandon")
             continue
 
-        if valid_options and raw not in valid_options:
-            print(f"  {t('Invalid. Options:','无效。选项:')} {', '.join(sorted(valid_options))}")
-            continue
+        if valid_options:
+            # Check if it's a multi-select (comma or space separated)
+            parts = [p.strip() for p in raw.replace(",", " ").split() if p.strip()]
+            if all(p in valid_options for p in parts):
+                return ",".join(parts)
+            
+            if raw not in valid_options:
+                print(f"  {t('Invalid. Options:', '无效。选项:')} {', '.join(sorted(list(valid_options)))}")
+                continue
         return raw
 
 # ─── Main game loop ───
@@ -1279,10 +1373,12 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
     logger = GameLogger(character, actual_seed, enabled=log)
     action_log = []
+    engine_log_path = os.path.join(LOG_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{character}_{actual_seed}_stderr.log")
+    engine_log = open(engine_log_path, "w")
     proc = subprocess.Popen(
         [DOTNET, "run", "--no-build", "--project", PROJECT],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, bufsize=1,
+        stderr=engine_log, text=True, bufsize=1,
     )
 
     def read():
@@ -1381,6 +1477,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
             dec = state.get("decision", "")
 
+
             if dec == "game_over":
                 victory = state.get("victory", False)
                 p = state.get("player", {})
@@ -1438,6 +1535,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 else:
                     valid = {str(i): ch for i, ch in enumerate(choices)}
                     key = get_input(t("Choose path [number]", "选择路径 [编号]"), set(valid.keys()), state=state)
+                    if isinstance(key, dict):
+                        state = key
+                        continue
                     pick = valid[key]
 
                 state = send({"cmd": "action", "action": "select_map_node",
@@ -1468,6 +1568,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         choice = "e"
                 else:
                     choice = get_input(t("Play card [index], (e)nd turn, (p0) potion", "出牌 [编号], (e)结束回合, (p0)药水"), set(valid.keys()) | {"help"}, state=state)
+                    if isinstance(choice, dict):
+                        state = choice
+                        continue
                     if choice == "help":
                         print(f"  {t('Enter card index, e=end turn, p0=use potion 0', '输入卡牌编号，e=结束回合，p0=使用药水0')}")
                         continue
@@ -1489,11 +1592,15 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 elif choice.startswith("p") and choice[1:].isdigit():
                     # Use potion
                     pidx = int(choice[1:])
+                    # Find the potion to check its target type
+                    pots = state.get("player", {}).get("potions", [])
+                    potion = next((p for p in pots if p.get("index") == pidx), None)
+                    
                     args = {"potion_index": pidx}
-                    # Ask for target if needed
-                    if enemies:
-                        tgt = get_input("Target enemy [index] or self (s)", state=state)
-                        if tgt != "s" and tgt.isdigit():
+                    if potion and potion.get("target_type") == "AnyEnemy" and enemies:
+                        valid_targets = {str(e["index"]) for e in enemies} | {"s"}
+                        tgt = get_input(t("Target enemy [index] or self (s)", "选择目标敌人 [编号] 或自己 (s)"), valid_targets, state=state)
+                        if tgt != "s":
                             args["target_index"] = int(tgt)
                     state = send({"cmd": "action", "action": "use_potion", "args": args})
                 else:
@@ -1615,7 +1722,20 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 if auto:
                     choice = "leave"
                 else:
-                    choice = get_input(t("Buy [index/r0/p0/rm] or (leave)", "购买 [编号/r0/p0/rm] 或 (leave)离开"), state=state)
+                    valid = {"leave"}
+                    if state.get("card_removal_cost"):
+                        valid.add("rm")
+                    for cd in state.get("cards", []):
+                        if cd.get("is_stocked"):
+                            valid.add(str(cd["index"]))
+                    for r in state.get("relics", []):
+                        if r.get("is_stocked"):
+                            valid.add(f"r{r['index']}")
+                    for p in state.get("potions", []):
+                        if p.get("is_stocked"):
+                            valid.add(f"p{p['index']}")
+                    
+                    choice = get_input(t("Buy [index/r0/p0/rm] or (leave)", "购买 [编号/r0/p0/rm] 或 (leave)离开"), valid, state=state)
 
                 if choice == "leave":
                     state = send({"cmd": "action", "action": "leave_room"})
@@ -1671,6 +1791,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     choice = str(unlocked[0]["index"]) if unlocked else "leave"
                 else:
                     choice = get_input(t("Choose option [index] or (leave)", "选择 [编号] 或 (leave)离开"), set(valid.keys()), state=state)
+                    if isinstance(choice, dict):
+                        state = choice
+                        continue
 
                 if choice == "leave":
                     state = send({"cmd": "action", "action": "leave_room"})
@@ -1715,6 +1838,12 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         changes.append(f"{t('Gold','金')}: {'+' if diff > 0 else ''}{diff}")
                     if changes:
                         print(f"\n  {c(t('Changes:','变化:'), 'yellow')} {'; '.join(changes)}")
+
+            elif dec == "combat_waiting":
+                print(f"  {c(state.get('message', 'Waiting...'), 'dim')}")
+                import time
+                time.sleep(0.5)
+                state = send({"cmd": "action", "action": "proceed"})
 
             else:
                 print(f"  {t('Unknown state:','未知状态:')} {dec}")
@@ -1773,7 +1902,7 @@ if __name__ == "__main__":
     parser.add_argument("--ascension", type=int, default=0,
                        choices=range(0, 11), metavar="0-10",
                        help="Ascension level (0-10)")
-    parser.add_argument("--lang", type=str, default="zh",
+    parser.add_argument("--lang", type=str, default="en",
                        choices=["en", "zh", "both"],
                        help="Display language: en, zh, or both")
     parser.add_argument("--no-log", action="store_true",
@@ -1786,7 +1915,12 @@ if __name__ == "__main__":
                        help="Show info from a save file (provide path)")
     parser.add_argument("--continue", dest="continue_save", type=str, default=None,
                        help="Continue playing from a save file (provide path)")
+    parser.add_argument("--sync", action="store_true", help="Sync localization from game PCK before starting")
     args = parser.parse_args()
+
+    if args.sync:
+        from sync_localization import sync_localization
+        sync_localization()
 
     LANG = args.lang
 

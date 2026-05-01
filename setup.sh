@@ -58,7 +58,6 @@ DLLS=(
     "SmartFormat.dll"
     "SmartFormat.ZString.dll"
     "Sentry.dll"
-    "Steamworks.NET.dll"
     "MonoMod.Backports.dll"
     "MonoMod.ILHelpers.dll"
     "0Harmony.dll"
@@ -111,6 +110,18 @@ fi
 echo ""
 echo "🔧 .NET SDK: $DOTNET ($($DOTNET --version))"
 
+# ── Build Stubs ──
+
+echo ""
+echo "🏗️ Building stubs..."
+$DOTNET build src/GodotStubs/GodotStubs.csproj -c Release > /dev/null
+$DOTNET build src/SteamworksStubs/SteamworksStubs.csproj -c Release > /dev/null
+
+cp src/GodotStubs/bin/Release/net9.0/GodotSharp.dll lib/
+cp src/SteamworksStubs/bin/Release/net9.0/Steamworks.NET.dll lib/
+echo "  ✓ GodotSharp.dll (stub)"
+echo "  ✓ Steamworks.NET.dll (stub)"
+
 # ── IL Patch sts2.dll ──
 
 echo ""
@@ -133,6 +144,8 @@ PROJ
 cat > "$PATCH_DIR/Program.cs" << 'CSHARP'
 using System;
 using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -145,10 +158,19 @@ resolver.AddSearchDirectory(libDir);
 // Also search for GodotSharp.dll in the GodotStubs output (fallback)
 var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "src", "GodotStubs", "bin", "Debug", "net9.0");
 if (Directory.Exists(stubsDir)) resolver.AddSearchDirectory(stubsDir);
+// Add .NET runtime directory for system assemblies
+var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
+if (runtimeDir != null) resolver.AddSearchDirectory(runtimeDir);
 var module = ModuleDefinition.ReadModule(dllPath, new ReaderParameters {
     AssemblyResolver = resolver,
-    ReadingMode = ReadingMode.Deferred  // Don't force-resolve all references upfront
+    ReadingMode = ReadingMode.Deferred
 });
+
+// Helper to safely import methods from other assemblies
+MethodReference ImportMethod(Type type, string methodName, params Type[] paramTypes) {
+    var method = type.GetMethod(methodName, paramTypes);
+    return module.ImportReference(method);
+}
 
 int patches = 0;
 
@@ -196,6 +218,90 @@ foreach (var type in module.Types)
             il.Emit(OpCodes.Ret);
             patches++;
             Console.WriteLine($"  Patched {type.Name}.{method.Name} → Task.CompletedTask");
+        }
+}
+}
+
+// Patch 3: Fix Steam API TypeLoadException
+var steamInit = module.GetType("MegaCrit.Sts2.Core.Platform.Steam.SteamInitializer");
+if (steamInit != null) {
+    var prop = steamInit.Properties.FirstOrDefault(p => p.Name == "InitResult");
+    if (prop != null) steamInit.Properties.Remove(prop);
+    var field = steamInit.Fields.FirstOrDefault(f => f.Name.Contains("InitResult"));
+    if (field != null) steamInit.Fields.Remove(field);
+    var getter = steamInit.Methods.FirstOrDefault(m => m.Name == "get_InitResult");
+    if (getter != null) steamInit.Methods.Remove(getter);
+    var setter = steamInit.Methods.FirstOrDefault(m => m.Name == "set_InitResult");
+    if (setter != null) steamInit.Methods.Remove(setter);
+    var initInt = steamInit.Methods.FirstOrDefault(m => m.Name == "InitializeInternal");
+    if (initInt != null && initInt.Body != null) {
+        initInt.Body.Instructions.Clear();
+        initInt.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        initInt.Body.ExceptionHandlers.Clear();
+        initInt.Body.Variables.Clear();
+    }
+    patches++;
+    Console.WriteLine("  Patched SteamInitializer");
+}
+var nGame = module.GetType("MegaCrit.Sts2.Core.Nodes.NGame");
+if (nGame != null) {
+    var onSteam = nGame.Methods.FirstOrDefault(m => m.Name == "OnSteamNoLongerRunning");
+    if (onSteam != null && onSteam.Body != null) {
+        onSteam.Body.Instructions.Clear();
+        onSteam.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        onSteam.Body.ExceptionHandlers.Clear();
+        onSteam.Body.Variables.Clear();
+    }
+}
+
+// Patch 4: Fix LocTable.GetRawText to handle missing keys without throwing
+var locTable = module.GetType("MegaCrit.Sts2.Core.Localization.LocTable");
+if (locTable != null) {
+    var getRawText = locTable.Methods.FirstOrDefault(m => m.Name == "GetRawText" && m.Parameters.Count == 1);
+    if (getRawText != null && getRawText.Body != null) {
+        var il = getRawText.Body.GetILProcessor();
+        il.Body.Instructions.Clear();
+        il.Body.ExceptionHandlers.Clear();
+        il.Body.Variables.Clear();
+
+        var resultVar = new VariableDefinition(module.TypeSystem.String);
+        il.Body.Variables.Add(resultVar);
+
+        var fieldDict = locTable.Fields.FirstOrDefault(f => f.Name == "_translations");
+        // Import TryGetValue directly from the BCL to avoid scope issues
+        var tryGetValue = ImportMethod(typeof(Dictionary<string, string>), "TryGetValue", typeof(string), typeof(string).MakeByRefType());
+
+        var insRet = Instruction.Create(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Ldfld, fieldDict);
+        il.Emit(OpCodes.Ldarg_1);
+        il.Emit(OpCodes.Ldloca, resultVar);
+        il.Emit(OpCodes.Callvirt, tryGetValue);
+        il.Emit(OpCodes.Brfalse, insRet);
+        il.Emit(OpCodes.Ldloc, resultVar);
+        il.Emit(OpCodes.Ret);
+        il.Append(insRet);
+        il.Append(Instruction.Create(OpCodes.Ret));
+        patches++;
+        Console.WriteLine("  Patched LocTable.GetRawText");
+    }
+}
+
+// Patch 5: Cmd.Wait → Task.CompletedTask
+var cmdType = module.GetType("MegaCrit.Sts2.Core.Commands.Cmd");
+if (cmdType != null) {
+    var taskType = module.ImportReference(typeof(System.Threading.Tasks.Task));
+    var completedProp = module.ImportReference(
+        typeof(System.Threading.Tasks.Task).GetProperty("CompletedTask")!.GetGetMethod()!);
+
+    foreach (var method in cmdType.Methods) {
+        if (method.Name == "Wait" && method.Body != null) {
+            var il = method.Body.GetILProcessor();
+            il.Body.Instructions.Clear();
+            il.Emit(OpCodes.Call, completedProp);
+            il.Emit(OpCodes.Ret);
+            patches++;
+            Console.WriteLine($"  Patched Cmd.{method.Name}");
         }
     }
 }

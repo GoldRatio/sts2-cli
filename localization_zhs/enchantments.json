@@ -18,6 +18,9 @@
   "IMBUED.description": "这张牌在每场战斗开始时自动打出。",
   "IMBUED.extraCardText": "注能。",
   "IMBUED.title": "注能",
+  "INKY.description": "这张牌额外造成[blue]{Damage}[/blue]点伤害，并造成[blue]{WeakPower}[/blue]层[gold]虚弱[/gold]。",
+  "INKY.extraCardText": "{TargetType:choose(AllEnemies):对所有敌人|}造成[blue]{WeakPower}[/blue]层[gold]虚弱[/gold]。",
+  "INKY.title": "墨影",
   "INSTINCT.description": "这张牌的攻击伤害翻倍。",
   "INSTINCT.title": "本能",
   "MOCK_FREE_ENCHANTMENT.title": "临时免费附魔",
@@ -49,8 +52,8 @@
   "SWIFT.description": "你第一次打出这张牌时，抽[blue]{Amount}[/blue]张牌。",
   "SWIFT.extraCardText": "第一次打出时抽{Amount}张牌。",
   "SWIFT.title": "迅速",
-  "TEZCATARAS_EMBER.description": "费用为[blue]0[/blue]且获得[gold]永恒[/gold]。",
   "TEZCATARAS_EMBER.title": "特兹卡塔拉的余烬",
   "VIGOROUS.description": "第一次打出这张牌时，造成[blue]{Amount}[/blue]点额外伤害。",
-  "VIGOROUS.title": "活力"
+  "VIGOROUS.title": "活力",
+  "TEZCATARAS_EMBER.description": "费用为[blue]0[/blue]，造成[blue]{Damage}[/blue] 点额外伤害，且获得[gold]永恒[/gold]。"
 }

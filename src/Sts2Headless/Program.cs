@@ -19,22 +19,25 @@ class Program
         // Prevent unhandled exceptions from crashing the process
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-            Console.Error.WriteLine($"[FATAL] Unhandled: {e.ExceptionObject}");
+        // Console.Error.WriteLine($"[FATAL] Unhandled: {e.ExceptionObject}");
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Exception?.Message}");
+        // Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Exception?.Message}");
             e.SetObserved();
         };
 
         // Set up assembly resolution to find game DLLs
-        var libDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "lib");
+        var libDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "lib");
         if (!Directory.Exists(libDir))
             libDir = Path.Combine(AppContext.BaseDirectory, "lib");
+            
+        // Console.Error.WriteLine($"[DEBUG] libDir resolved to: {Path.GetFullPath(libDir)}");
 
         AssemblyLoadContext.Default.Resolving += (ctx, name) =>
         {
             var path = Path.Combine(libDir, name.Name + ".dll");
+            // Console.Error.WriteLine($"[DEBUG] Resolving {name.Name} at {path}");
             if (File.Exists(path))
                 return ctx.LoadFromAssemblyPath(Path.GetFullPath(path));
 
@@ -43,13 +46,21 @@ class Program
             if (!string.IsNullOrEmpty(gameDir))
             {
                 path = Path.Combine(gameDir, name.Name + ".dll");
+                // Console.Error.WriteLine($"[DEBUG] Resolving {name.Name} at game dir {path}");
                 if (File.Exists(path))
                     return ctx.LoadFromAssemblyPath(path);
             }
 
+            // Console.Error.WriteLine($"[DEBUG] Failed to resolve {name.Name}");
             return null;
         };
 
+        RunImpl(args);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void RunImpl(string[] args)
+    {
         var sim = new RunSimulator();
         WriteLine(new Dictionary<string, object?> { ["type"] = "ready", ["version"] = "0.2.0" });
 
