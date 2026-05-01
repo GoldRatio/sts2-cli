@@ -47,7 +47,7 @@ Type `help` in-game:
   relics   — show relics
   quit     — quit
 
-  Map:     enter path number (0, 1, 2)
+  Map:     enter path number (0, 1, 2)k
   Combat:  card index / e (end turn) / p0 (use potion)
   Reward:  card index / s (skip)
   Rest:    option index

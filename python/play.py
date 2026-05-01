@@ -314,7 +314,38 @@ def short_n(obj):
     """Short name only."""
     return str(obj) if obj is not None else "?"
 
-def desc(obj):
+def resolve_template(text, vars_dict):
+    """Replace [VarName] in text with actual values from vars dict.
+    Matches case-insensitively against the vars dict keys.
+    Also handles special vars like energyPrefix."""
+    if not text:
+        return text
+    import re
+    # Build case-insensitive lookup from stats + special vars
+    lower_vars = {}
+    if vars_dict:
+        lower_vars = {k.lower(): v for k, v in vars_dict.items()}
+    def replacer(m):
+        key = m.group(1)
+        # Handle plural: [Cards:card|cards]
+        if ':' in key and '|' in key:
+            var_name, plural_spec = key.split(':', 1)
+            val = lower_vars.get(var_name.lower())
+            if val is not None:
+                forms = plural_spec.split('|')
+                return forms[0] if int(val) == 1 else (forms[1] if len(forms) > 1 else forms[0])
+            return f"[{key}]"
+        kl = key.lower()
+        val = lower_vars.get(kl)
+        if val is not None:
+            return str(val)
+        # Special vars
+        if kl == "energyprefix":
+            return ""  # prefix only, unit already added by energyIcons handler in desc()
+        return f"[{key}]"
+    return re.sub(r'\[([^\]]+)\]', replacer, text)
+
+def desc(obj, vars_dict=None):
     """Extract description, strip BBCode tags, clean SmartFormat vars."""
     text = ""
     if isinstance(obj, dict):
@@ -379,6 +410,10 @@ def desc(obj):
         # Process from innermost braces outward (handle nesting)
         for _ in range(3):  # max 3 nesting levels
             text = re.sub(r'\{([^{}]+)\}', smart_replace, text)
+        
+        if vars_dict:
+            text = resolve_template(text, vars_dict)
+            
         return text.strip()
     return ""
 
@@ -415,51 +450,17 @@ SPECIAL_VARS = {
     "energy": "能量",
 }
 
-def resolve_template(text, vars_dict):
-    """Replace [VarName] in text with actual values from vars dict.
-    Matches case-insensitively against the vars dict keys.
-    Also handles special vars like energyPrefix."""
-    if not text:
-        return text
-    import re
-    # Build case-insensitive lookup from stats + special vars
-    lower_vars = {}
-    if vars_dict:
-        lower_vars = {k.lower(): v for k, v in vars_dict.items()}
-    def replacer(m):
-        key = m.group(1)
-        # Handle plural: [Cards:card|cards]
-        if ':' in key and '|' in key:
-            var_name, plural_spec = key.split(':', 1)
-            val = lower_vars.get(var_name.lower())
-            if val is not None:
-                forms = plural_spec.split('|')
-                return forms[0] if int(val) == 1 else (forms[1] if len(forms) > 1 else forms[0])
-            return f"[{key}]"
-        kl = key.lower()
-        val = lower_vars.get(kl)
-        if val is not None:
-            return str(val)
-        # Special vars
-        if kl == "energyprefix":
-            return ""  # prefix only, unit already added by energyIcons handler in desc()
-        return f"[{key}]"
-    return re.sub(r'\[([^\]]+)\]', replacer, text)
+
 
 def card_desc(card):
     """Get resolved card description using stats as template vars."""
-    d = desc(card.get("description", {}))
-    stats = card.get("stats") or {}
-    return resolve_template(d, stats)  # always resolve (handles energyPrefix etc.)
+    return desc(card.get("description", {}), card.get("stats"))
 
 def relic_str(r):
     """Format a relic with name and resolved description."""
     if isinstance(r, dict) and "name" in r:
         name = n(r["name"])
-        d = desc(r.get("description", {}))
-        # Resolve template vars with actual values
-        vars_dict = r.get("vars") or {}
-        d = resolve_template(d, vars_dict)
+        d = desc(r.get("description", {}), r.get("vars"))
         return f"{name}" + (f": {c(d, 'dim')}" if d else "")
     return n(r)
 
@@ -467,9 +468,7 @@ def potion_str(p):
     """Format a potion with name and resolved description."""
     if isinstance(p, dict) and "name" in p:
         name = n(p["name"])
-        d = desc(p.get("description", {}))
-        vars_dict = p.get("vars") or {}
-        d = resolve_template(d, vars_dict) if vars_dict else d
+        d = desc(p.get("description", {}), p.get("vars"))
         idx = p.get("index", "?")
         return f"[{idx}] {name}" + (f": {c(d, 'dim')}" if d else "")
     return n(p)
@@ -526,9 +525,7 @@ def show_combat(state):
         for pw in ppowers:
             amt = pw.get("amount", 0)
             amt_str = f" {amt}" if amt and amt != 0 else ""
-            pw_desc = desc(pw.get("description", ""))
-            if pw_desc and amt:
-                pw_desc = resolve_template(pw_desc, {"Amount": abs(amt) if isinstance(amt, (int, float)) else amt})
+            pw_desc = desc(pw.get("description", ""), {"Amount": abs(amt) if isinstance(amt, (int, float)) else amt})
             is_debuff = isinstance(amt, (int, float)) and amt < 0
             color = "red" if is_debuff else "green"
             label = t("Debuff", "减益") if is_debuff else t("Buff", "增益")
@@ -760,6 +757,29 @@ def show_card_reward(state):
         if aug_parts:
             print(f"      {c(t('upgrade:','升级:'), 'green')} {', '.join(aug_parts)}")
 
+def show_combat_rewards(state):
+    print(f"\n{'─' * 60}")
+    print(f"  {c(t('Combat Rewards','战斗奖励'), 'bold')}")
+    show_player(state.get("player", {}))
+    print()
+    rewards = state.get("rewards", [])
+    for r in rewards:
+        idx = r.get("index")
+        name = r.get("name", "Unknown")
+        rtype = r.get("type")
+        amount = r.get("amount")
+        
+        color = "white"
+        if rtype == "GoldReward": color = "yellow"
+        elif rtype == "RelicReward": color = "magenta"
+        elif rtype == "PotionReward": color = "green"
+        elif rtype == "CardReward": color = "cyan"
+        
+        amt_str = f" ({c(str(amount), 'yellow')}g)" if amount else ""
+        print(f"  [{idx}] {c(t(name), color)}{amt_str}")
+    
+    print(f"\n  [p] {c(t('Proceed','继续'), 'bold')}")
+
 def show_shop(state):
     print(f"\n{'─' * 60}")
     print(f"  {c(t('Shop','商店'), 'bold')}")
@@ -787,7 +807,7 @@ def show_shop(state):
         if not r.get("is_stocked"): continue
         cost = r.get("cost", 0)
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
-        r_desc = desc(r.get("description", ""))
+        r_desc = desc(r.get("description", ""), r.get("vars"))
         print(f"  [r{r['index']}] {n(r['name'])} — {affordable}{t('g','金')}")
         if r_desc:
             print(f"      {c(r_desc, 'dim')}")
@@ -797,7 +817,7 @@ def show_shop(state):
         if not p.get("is_stocked"): continue
         cost = p.get("cost", 0)
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
-        p_desc = desc(p.get("description", ""))
+        p_desc = desc(p.get("description", ""), p.get("vars"))
         print(f"  [p{p['index']}] {n(p['name'])} — {affordable}{t('g','金')}")
         if p_desc:
             print(f"      {c(p_desc, 'dim')}")
@@ -947,11 +967,7 @@ def show_event(state):
                         raw_desc = resolved
                         break
 
-        opt_desc = desc(raw_desc) if raw_desc else ""
-        # Resolve template vars like [MaxHp], [Gold], {Cards}
-        opt_vars = opt.get("vars") or {}
-        if opt_vars and opt_desc:
-            opt_desc = resolve_template(opt_desc, opt_vars)
+        opt_desc = desc(raw_desc, opt.get("vars")) if raw_desc else ""
         desc_str = f" — {c(opt_desc, 'dim')}" if opt_desc else ""
         print(f"  {mark} [{opt['index']}] {title}{desc_str}")
 
@@ -1616,6 +1632,22 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                                            {str(e["index"]) for e in enemies})
                             args["target_index"] = int(tgt)
                     state = send({"cmd": "action", "action": "play_card", "args": args})
+
+            elif dec == "combat_rewards":
+                show_combat_rewards(state)
+                rewards = state.get("rewards", [])
+                valid = {str(r["index"]): r for r in rewards}
+                valid["p"] = None
+
+                if auto:
+                    choice = "0" if rewards else "p"
+                else:
+                    choice = get_input(t("Take reward [index] or (p)roceed", "选择奖励 [编号] 或 (p)继续"), set(valid.keys()), state=state)
+
+                if choice == "p":
+                    state = send({"cmd": "action", "action": "proceed"})
+                else:
+                    state = send({"cmd": "action", "action": "take_reward", "args": {"index": int(choice)}})
 
             elif dec == "card_reward":
                 show_card_reward(state)

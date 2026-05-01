@@ -290,6 +290,18 @@ public class RunSimulator
         field?.SetValue(obj, value);
     }
 
+    private static object? GetField(object obj, string fieldName)
+    {
+        var field = obj.GetType().GetField(fieldName, NonPublic);
+        return field?.GetValue(obj);
+    }
+
+    private static object? GetProperty(object obj, string propName)
+    {
+        var prop = obj.GetType().GetProperty(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        return prop?.GetValue(obj);
+    }
+
     public Dictionary<string, object?> SetPlayer(Dictionary<string, System.Text.Json.JsonElement> args)
     {
         try
@@ -776,6 +788,8 @@ public class RunSimulator
                     return DoLeaveRoom(player);
                 case "proceed":
                     return DoProceed(player);
+                case "take_reward":
+                    return DoTakeReward(player, args);
                 default:
                     return Error($"Unknown action: {action}");
             }
@@ -1086,8 +1100,14 @@ public class RunSimulator
         }
         catch (Exception ex) { Log($"Add card to deck: {ex.Message}"); }
 
-        _pendingCardReward = null;
         // Check if more rewards pending
+        if (_pendingRewards != null)
+        {
+            _pendingRewards.Remove(_pendingCardReward);
+            if (_pendingRewards.Count == 0) _pendingRewards = null;
+        }
+        _pendingCardReward = null;
+
         return DetectDecisionPoint();
     }
 
@@ -1106,6 +1126,11 @@ public class RunSimulator
         {
             Log("Skipping card reward");
             _pendingCardReward.OnSkipped();
+            if (_pendingRewards != null)
+            {
+                _pendingRewards.Remove(_pendingCardReward);
+                if (_pendingRewards.Count == 0) _pendingRewards = null;
+            }
             _pendingCardReward = null;
         }
         return DetectDecisionPoint();
@@ -1270,17 +1295,21 @@ public class RunSimulator
         _syncCtx.Pump();
         WaitForActionExecutor();
 
-        // Extra wait for rest-site SMITH: the background ChooseLocalOption task
-        // needs time to complete the upgrade after card selection resolves.
-        if (_runState?.CurrentRoom is RestSiteRoom)
+        // Extra wait for rest-site SMITH and events: the background choice tasks
+        // need time to complete transitions after card selection resolves.
+        if (_runState?.CurrentRoom is RestSiteRoom || _runState?.CurrentRoom is EventRoom)
         {
             Thread.Sleep(200);
             _syncCtx.Pump();
             WaitForActionExecutor();
-            // Force to map after SMITH completes (same pattern as HEAL)
-            Log("Card selection in rest site (SMITH), forcing to map");
-            ForceToMap();
-            return MapSelectState();
+            
+            if (_runState?.CurrentRoom is RestSiteRoom)
+            {
+                // Force to map after SMITH completes (same pattern as HEAL)
+                Log("Card selection in rest site (SMITH), forcing to map");
+                ForceToMap();
+                return MapSelectState();
+            }
         }
 
         // Extra wait for shop card removal: the purchase task needs to finish
@@ -1453,16 +1482,16 @@ public class RunSimulator
             var localEvent = eventSync?.GetLocalEvent();
             if (localEvent != null && !localEvent.IsFinished)
             {
-                var options = localEvent.CurrentOptions;
-                var optCountBefore = options?.Count ?? 0;
+                var options = localEvent.CurrentOptions?.ToList();
                 if (options != null && optionIndex >= 0 && optionIndex < options.Count)
                 {
                     try
                     {
                         _eventOptionChosen = true;
                         _lastEventOptionCount = options.Count;
-                        // Run on thread pool so GetSelectedCards/GetSelectedCardReward can block
-                        var task = Task.Run(() => options[optionIndex].Chosen());
+                        // Use EventSynchronizer.ChooseLocalOption for robust state transitions.
+                        // Run on thread pool so GetSelectedCards/GetSelectedCardReward can block.
+                        var task = Task.Run(() => eventSync.ChooseLocalOption(optionIndex));
                         for (int i = 0; i < 100; i++)
                         {
                             _syncCtx.Pump();
@@ -1477,9 +1506,17 @@ public class RunSimulator
                             return DetectDecisionPoint();
                         }
                         if (!task.IsCompleted) task.Wait(2000);
+                        
+                        // Extra pump and wait to allow state transitions (e.g. to combat) to start
+                        _syncCtx.Pump();
+                        Thread.Sleep(100);
                         _syncCtx.Pump();
                     }
-                    catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
+                    catch (Exception ex) 
+                    { 
+                        Log($"Event choose: {ex.Message}"); 
+                        Console.Error.WriteLine($"[ERROR] Event choice {optionIndex} failed: {ex}");
+                    }
                 }
             }
         }
@@ -1515,6 +1552,9 @@ public class RunSimulator
     private Dictionary<string, object?> DoProceed(Player player)
     {
         Log("Proceeding");
+        _pendingRewards = null;
+        _pendingCardReward = null;
+        _rewardsProcessed = true;
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
@@ -1523,6 +1563,12 @@ public class RunSimulator
             if (combatRoom.IsPreFinished || !CombatManager.Instance.IsInProgress)
             {
                 RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
+                _syncCtx.Pump();
+                if (_runState?.Map?.StartingMapPoint != null)
+                {
+                    RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
+                    _syncCtx.Pump();
+                }
                 WaitForActionExecutor();
                 return DetectDecisionPoint();
             }
@@ -2046,7 +2092,7 @@ public class RunSimulator
         Log($"Post-combat: RoomType={combatRoom.RoomType}, IsPreFinished={combatRoom.IsPreFinished}");
         _syncCtx.Pump();
 
-        // Generate rewards manually instead of using TestMode auto-accept
+        // Generate rewards manually
         if (_pendingRewards == null && !_rewardsProcessed)
         {
             _goldBeforeCombat = player.Gold;
@@ -2056,32 +2102,20 @@ public class RunSimulator
                 var rewards = rewardsSet.GenerateWithoutOffering().GetAwaiter().GetResult();
                 _syncCtx.Pump();
 
-                // Auto-collect gold and potions, but present card choices to agent
-                var cardRewards = new List<CardReward>();
-                foreach (var reward in rewards)
+                if (rewards != null && rewards.Count > 0)
                 {
-                    if (reward is GoldReward || reward is MegaCrit.Sts2.Core.Rewards.RelicReward
-                        || reward is MegaCrit.Sts2.Core.Rewards.PotionReward)
-                    {
-                        try { reward.OnSelectWrapper().GetAwaiter().GetResult(); _syncCtx.Pump(); }
-                        catch (Exception ex) { Log($"Auto-collect reward: {ex.Message}"); }
-                    }
-                    else if (reward is CardReward cr)
-                    {
-                        cardRewards.Add(cr);
-                    }
-                }
-
-                if (cardRewards.Count > 0)
-                {
-                    _pendingCardReward = cardRewards[0];
-                    _pendingRewards = rewards;
-                    return CardRewardState(player, combatRoom);
+                    _pendingRewards = rewards.ToList();
+                    return CombatRewardsState(player, combatRoom);
                 }
 
                 _pendingRewards = null;
             }
             catch (Exception ex) { Log($"Generate rewards: {ex.Message}"); }
+        }
+
+        if (_pendingRewards != null && _pendingRewards.Count > 0)
+        {
+            return CombatRewardsState(player, combatRoom);
         }
 
         // No more pending rewards — proceed
@@ -2097,6 +2131,11 @@ public class RunSimulator
             {
                 RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
                 _syncCtx.Pump();
+                if (_runState?.Map?.StartingMapPoint != null)
+                {
+                    RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
+                    _syncCtx.Pump();
+                }
                 WaitForActionExecutor();
             }
             catch (Exception ex) { Log($"EnterNextAct: {ex.Message}"); }
@@ -2112,6 +2151,12 @@ public class RunSimulator
     {
         if (_pendingCardReward == null)
             return DetectPostCombatState(player, combatRoom ?? (_runState?.CurrentRoom as CombatRoom)!);
+
+        if (_pendingCardReward.Cards == null)
+        {
+            Log("CardRewardState: Cards is NULL!");
+            return Error("CardReward has no cards");
+        }
 
         var cards = _pendingCardReward.Cards.Select((c, i) =>
         {
@@ -2140,6 +2185,89 @@ public class RunSimulator
             ["gold_earned"] = _runState!.Players[0].Gold - _goldBeforeCombat,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private Dictionary<string, object?> CombatRewardsState(Player player, CombatRoom combatRoom)
+    {
+        if (_pendingRewards == null || _pendingRewards.Count == 0)
+            return DetectPostCombatState(player, combatRoom);
+
+        var rewards = _pendingRewards.Select((r, i) =>
+        {
+            var summary = new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["type"] = r.GetType().Name
+            };
+
+            if (r is GoldReward gold)
+            {
+                summary["name"] = "Gold";
+                summary["amount"] = GetField(gold, "_gold") ?? 0;
+            }
+            else if (r is MegaCrit.Sts2.Core.Rewards.RelicReward rel)
+            {
+                var model = GetField(rel, "_relic") as RelicModel;
+                summary["name"] = model != null ? _loc.Relic(model.Id.Entry) : "Relic";
+            }
+            else if (r is MegaCrit.Sts2.Core.Rewards.PotionReward pot)
+            {
+                var model = GetField(pot, "_potion") as PotionModel;
+                summary["name"] = model != null ? _loc.Potion(model.Id.Entry) : "Potion";
+            }
+            else if (r is CardReward)
+            {
+                summary["name"] = "Card Reward";
+            }
+            else
+            {
+                summary["name"] = r.GetType().Name;
+            }
+
+            return summary;
+        }).ToList();
+
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "combat_rewards",
+            ["context"] = RunContext(),
+            ["rewards"] = rewards,
+            ["player"] = PlayerSummary(player),
+        };
+    }
+
+    private Dictionary<string, object?> DoTakeReward(Player player, Dictionary<string, object?>? args)
+    {
+        if (_pendingRewards == null || _pendingRewards.Count == 0)
+            return Error("No rewards pending");
+        if (args == null || !args.ContainsKey("index"))
+            return Error("take_reward requires 'index'");
+
+        int idx = Convert.ToInt32(args["index"]);
+        if (idx < 0 || idx >= _pendingRewards.Count)
+            return Error("Invalid reward index");
+
+        var reward = _pendingRewards[idx];
+        if (reward is CardReward cr)
+        {
+            _pendingCardReward = cr;
+            return DetectDecisionPoint();
+        }
+
+        try
+        {
+            reward.OnSelectWrapper().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            _pendingRewards.RemoveAt(idx);
+            if (_pendingRewards.Count == 0) _pendingRewards = null;
+        }
+        catch (Exception ex)
+        {
+            return Error($"Failed to collect reward: {ex.Message}");
+        }
+
+        return DetectDecisionPoint();
     }
 
     private void ForceToMap()
