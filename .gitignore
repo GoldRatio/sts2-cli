@@ -12,3 +12,18 @@ obj/
 .DS_Store
 .obsidian/
 logs/
+
+# Local/Temporary Files
+saves/
+scratch/
+python/localization_eng/
+python/localization_zhs/
+python/test_loc/
+python/test_sync.py
+python/manual_extract.py
+CecilTest/
+ReflectTool/
+ReflectTool.cs
+Program.cs
+patch_test.csproj
+src/SteamworksStubs/
