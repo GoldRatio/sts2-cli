@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Steamworks</RootNamespace>
+    <AssemblyName>Steamworks.NET</AssemblyName>
+    <Version>20.1.0.0</Version>
+    <AssemblyVersion>20.1.0.0</AssemblyVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>

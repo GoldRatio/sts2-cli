@@ -23,9 +23,15 @@ def _find_dotnet():
         
     for p in candidates:
         try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5, shell=(os.name == 'nt'))
+            # On Windows, 'where' can help find the full path if only 'dotnet' is known
+            if p == "dotnet" and os.name == 'nt':
+                w = subprocess.run(["where", "dotnet"], capture_output=True, text=True, shell=True)
+                if w.returncode == 0:
+                    p = w.stdout.splitlines()[0].strip()
+
+            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5, shell=(os.name == 'nt' and not os.path.isabs(p)))
             if r.returncode == 0:
-                return p
+                return os.path.abspath(p)
         except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
             continue
     return None
@@ -106,9 +112,14 @@ def build_stubs():
     ]
     
     for proj in projects:
+        proj = os.path.abspath(proj)
         print(f"  Building {os.path.basename(proj)}...")
+        if not os.path.exists(proj):
+            print(f"  ❌ File not found: {proj}")
+            return False
+            
         r = subprocess.run([DOTNET, "build", proj, "-c", "Release"], 
-                           capture_output=True, text=True, shell=(os.name == 'nt'))
+                           capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  ❌ Build failed for {proj}")
             if r.stdout:
@@ -331,7 +342,7 @@ def apply_patches():
         
         # Run patcher
         r = subprocess.run([DOTNET, "run", "--", sts2_dll], 
-                           cwd=tmpdir, capture_output=True, text=True, shell=(os.name == 'nt'))
+                           cwd=tmpdir, capture_output=True, text=True)
         if r.returncode != 0:
             print("  ❌ Patching failed")
             print(r.stdout)
@@ -348,7 +359,7 @@ def build_headless():
     print("\n🏗️ Building Sts2Headless...")
     proj = os.path.join(SRC_DIR, "Sts2Headless", "Sts2Headless.csproj")
     r = subprocess.run([DOTNET, "build", proj], 
-                       capture_output=True, text=True, shell=(os.name == 'nt'))
+                       capture_output=True, text=True)
     if r.returncode != 0:
         print("  ❌ Build failed")
         if r.stdout:
