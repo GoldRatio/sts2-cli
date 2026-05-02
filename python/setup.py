@@ -111,7 +111,12 @@ def build_stubs():
                            capture_output=True, text=True, shell=(os.name == 'nt'))
         if r.returncode != 0:
             print(f"  ❌ Build failed for {proj}")
-            print(r.stderr)
+            if r.stdout:
+                print("--- STDOUT ---")
+                print(r.stdout)
+            if r.stderr:
+                print("--- STDERR ---")
+                print(r.stderr)
             return False
 
     # Copy output DLLs to lib/
@@ -346,7 +351,12 @@ def build_headless():
                        capture_output=True, text=True, shell=(os.name == 'nt'))
     if r.returncode != 0:
         print("  ❌ Build failed")
-        print(r.stderr)
+        if r.stdout:
+            print("--- STDOUT ---")
+            print(r.stdout)
+        if r.stderr:
+            print("--- STDERR ---")
+            print(r.stderr)
         return False
     print("  ✓ Build succeeded")
     return True

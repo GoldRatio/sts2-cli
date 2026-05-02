@@ -20,7 +20,7 @@ Requirements:
 - Python 3.9+
 
 ```bash
-git https://github.com/GoldRatio/sts2-cli.git
+git clone https://github.com/GoldRatio/sts2-cli.git
 cd sts2-cli
 python3 python/setup.py      # copies DLLs → builds stubs → IL patches → builds
 ```
