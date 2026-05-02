@@ -1,7 +1,6 @@
 # sts2-cli
 
 <details open>
-<summary><b>English</b></summary>
 
 Forked from [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli). This fork keeps the original headless CLI core but aims to add RL agent capability and fixing some bugs that exist within the original repository for that purpose.
 
@@ -21,7 +20,7 @@ Requirements:
 - Python 3.9+
 
 ```bash
-git clone https://github.com/wuhao21/sts2-cli.git
+git https://github.com/GoldRatio/sts2-cli.git
 cd sts2-cli
 python3 python/setup.py      # copies DLLs → builds stubs → IL patches → builds
 ```
