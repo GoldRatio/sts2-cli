@@ -10,7 +10,17 @@ import random
 import os
 from game_log import GameLogger
 
-DOTNET = os.path.expanduser("~/.dotnet-arm64/dotnet")
+def _find_dotnet():
+    candidates = [os.path.expanduser("~/.dotnet-arm64/dotnet"), os.path.expanduser("~/.dotnet/dotnet"), "dotnet"]
+    if os.name == 'nt': candidates.append("dotnet.exe")
+    for p in candidates:
+        try:
+            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=2, shell=(os.name == 'nt'))
+            if r.returncode == 0: return p
+        except: continue
+    return "dotnet"
+
+DOTNET = _find_dotnet()
 PROJECT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "src", "Sts2Headless", "Sts2Headless.csproj")
 

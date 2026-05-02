@@ -253,7 +253,17 @@ public class RunSimulator
 
             // Enter first act (generates map)
             RunManager.Instance.EnterAct(0, doTransition: true).GetAwaiter().GetResult();
+            _syncCtx.Pump();
             Log("Entered Act 0 with transition");
+
+            // BUGFIX: On some systems, EnterAct doesn't automatically trigger the Neow event
+            // node. If we are still on map/null room, explicitly enter the starting node.
+            if ((_runState.CurrentRoom is MapRoom || _runState.CurrentRoom == null) && _runState.Map?.StartingMapPoint != null)
+            {
+                Log("Explicitly entering Neow starting node");
+                RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
 
             // Register card selector for cards that need player choice
             CardSelectCmd.UseSelector(_cardSelector);
