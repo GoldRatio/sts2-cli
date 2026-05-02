@@ -3693,8 +3693,13 @@ public class RunSimulator
         {
             await CreatureCmd.Damage(ctx, play.Target!, (decimal)card.DynamicVars.Damage.BaseValue,
                 MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, card);
-            await PowerCmd.Apply<WeakPower>(ctx, play.Target!, (decimal)card.DynamicVars["WeakPower"].BaseValue,
-                card.Owner.Creature, card, false);
+            await PowerCmd.Apply<WeakPower>(
+                (MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext)ctx, 
+                (MegaCrit.Sts2.Core.Entities.Creatures.Creature)play.Target!, 
+                (decimal)card.DynamicVars["WeakPower"].BaseValue,
+                (MegaCrit.Sts2.Core.Entities.Creatures.Creature)card.Owner.Creature, 
+                (MegaCrit.Sts2.Core.Models.CardModel)card, 
+                (bool)false);
         }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}"); }
     }
