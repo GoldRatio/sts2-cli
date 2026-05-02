@@ -110,6 +110,9 @@ fi
 echo ""
 echo "🔧 .NET SDK: $DOTNET ($($DOTNET --version))"
 
+DOTNET_VER=$($DOTNET --version | cut -d. -f1)
+TFM="net$DOTNET_VER.0"
+
 # ── Build Stubs ──
 
 echo ""
@@ -117,8 +120,8 @@ echo "🏗️ Building stubs..."
 $DOTNET build src/GodotStubs/GodotStubs.csproj -c Release > /dev/null
 $DOTNET build src/SteamworksStubs/SteamworksStubs.csproj -c Release > /dev/null
 
-cp src/GodotStubs/bin/Release/net9.0/GodotSharp.dll lib/
-cp src/SteamworksStubs/bin/Release/net9.0/Steamworks.NET.dll lib/
+cp src/GodotStubs/bin/Release/$TFM/GodotSharp.dll lib/
+cp src/SteamworksStubs/bin/Release/$TFM/Steamworks.NET.dll lib/
 echo "  ✓ GodotSharp.dll (stub)"
 echo "  ✓ Steamworks.NET.dll (stub)"
 
@@ -133,7 +136,7 @@ cat > "$PATCH_DIR/Patcher.csproj" << 'PROJ'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>$TFM</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
@@ -156,7 +159,7 @@ var resolver = new DefaultAssemblyResolver();
 var libDir = Path.GetDirectoryName(dllPath)!;
 resolver.AddSearchDirectory(libDir);
 // Also search for GodotSharp.dll in the GodotStubs output (fallback)
-var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "src", "GodotStubs", "bin", "Debug", "net9.0");
+var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "src", "GodotStubs", "bin", "Debug", "$TFM");
 if (Directory.Exists(stubsDir)) resolver.AddSearchDirectory(stubsDir);
 // Add .NET runtime directory for system assemblies
 var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);

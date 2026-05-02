@@ -36,7 +36,21 @@ def _find_dotnet():
             continue
     return None
 
+def _get_dotnet_tfm(dotnet_path):
+    """Get the target framework moniker based on installed SDK version."""
+    if not dotnet_path:
+        return "net9.0"
+    try:
+        r = subprocess.run([dotnet_path, "--version"], capture_output=True, text=True)
+        if r.returncode == 0:
+            major = r.stdout.strip().split('.')[0]
+            return f"net{major}.0"
+    except:
+        pass
+    return "net9.0"
+
 DOTNET = _find_dotnet()
+TFM = _get_dotnet_tfm(DOTNET)
 
 def _find_game_dir():
     """Auto-detect STS2 Steam install directory."""
@@ -131,9 +145,9 @@ def build_stubs():
             return False
 
     # Copy output DLLs to lib/
-    shutil.copy2(os.path.join(SRC_DIR, "GodotStubs", "bin", "Release", "net9.0", "GodotSharp.dll"), 
+    shutil.copy2(os.path.join(SRC_DIR, "GodotStubs", "bin", "Release", TFM, "GodotSharp.dll"), 
                  os.path.join(LIB_DIR, "GodotSharp.dll"))
-    shutil.copy2(os.path.join(SRC_DIR, "SteamworksStubs", "bin", "Release", "net9.0", "Steamworks.NET.dll"), 
+    shutil.copy2(os.path.join(SRC_DIR, "SteamworksStubs", "bin", "Release", TFM, "Steamworks.NET.dll"), 
                  os.path.join(LIB_DIR, "Steamworks.NET.dll"))
     print("  ✓ Stubs ready")
     return True
@@ -141,7 +155,7 @@ def build_stubs():
 PATCH_PROJ = """<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>{TFM}</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
@@ -163,7 +177,7 @@ var resolver = new DefaultAssemblyResolver();
 var libDir = Path.GetDirectoryName(dllPath)!;
 resolver.AddSearchDirectory(libDir);
 // Also search for GodotSharp.dll in the GodotStubs output (fallback)
-var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "src", "GodotStubs", "bin", "Debug", "net9.0");
+var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "src", "GodotStubs", "bin", "Debug", "{TFM}");
 if (Directory.Exists(stubsDir)) resolver.AddSearchDirectory(stubsDir);
 // Add .NET runtime directory for system assemblies
 var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location);
@@ -328,9 +342,9 @@ def apply_patches():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         with open(os.path.join(tmpdir, "Patcher.csproj"), "w", encoding='utf-8') as f:
-            f.write(PATCH_PROJ)
+            f.write(PATCH_PROJ.replace("{TFM}", TFM))
         with open(os.path.join(tmpdir, "Program.cs"), "w", encoding='utf-8') as f:
-            f.write(PATCH_CS)
+            f.write(PATCH_CS.replace("{TFM}", TFM))
         
         # Run patcher
         r = subprocess.run([DOTNET, "run", "--", sts2_dll], 
