@@ -1129,7 +1129,7 @@ def _draw_conn(buf, from_col, to_col, W):
         if 0 <= mid < len(buf):
             buf[mid] = ch
 
-def get_input(prompt, valid_options=None, state=None):
+def get_input(prompt, valid_options=None, state=None, multi=False):
     """Get user input with validation. Supports meta-commands: help, map, deck, potions."""
     while True:
         try:
@@ -1245,14 +1245,18 @@ def get_input(prompt, valid_options=None, state=None):
             continue
 
         if valid_options:
-            # Check if it's a multi-select (comma or space separated)
             parts = [p.strip() for p in raw.replace(",", " ").split() if p.strip()]
-            if all(p in valid_options for p in parts):
-                return ",".join(parts)
+            if all(p in valid_options for p in parts) and parts:
+                if len(parts) > 1:
+                    if multi:
+                        return ",".join(parts)
+                    else:
+                        print(f"  {t('Only one selection is allowed.', '此处仅允许选择一项。')}")
+                        continue
+                return parts[0]
             
-            if raw not in valid_options:
-                print(f"  {t('Invalid. Options:', '无效。选项:')} {', '.join(sorted(list(valid_options)))}")
-                continue
+            print(f"  {t('Invalid. Options:', '无效。选项:')} {', '.join(sorted(list(valid_options)))}")
+            continue
         return raw
 
 # ─── Main game loop ───
@@ -1714,7 +1718,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 if auto:
                     choice = "0"
                 else:
-                    choice = get_input(t("Choose card(s) [index] or (s)kip", "选择卡牌 [编号] 或 (s)跳过"), set(valid.keys()), state=state)
+                    choice = get_input(t("Choose card(s) [index] or (s)kip", "选择卡牌 [编号] 或 (s)跳过"), set(valid.keys()), state=state, multi=True)
 
                 if choice == "s":
                     state = send({"cmd": "action", "action": "skip_select"})

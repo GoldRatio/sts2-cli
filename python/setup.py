@@ -335,9 +335,9 @@ def apply_patches():
     print("\n🔨 Applying IL patches to sts2.dll...")
     
     with tempfile.TemporaryDirectory() as tmpdir:
-        with open(os.path.join(tmpdir, "Patcher.csproj"), "w") as f:
+        with open(os.path.join(tmpdir, "Patcher.csproj"), "w", encoding='utf-8') as f:
             f.write(PATCH_PROJ)
-        with open(os.path.join(tmpdir, "Program.cs"), "w") as f:
+        with open(os.path.join(tmpdir, "Program.cs"), "w", encoding='utf-8') as f:
             f.write(PATCH_CS)
         
         # Run patcher

@@ -1076,7 +1076,7 @@ public class RunSimulator
             var idx = Convert.ToInt32(args["card_index"]);
             Log($"Resolving event card reward: index {idx}");
             _cardSelector.ResolveReward(idx);
-            Thread.Sleep(50);
+            Thread.Sleep(10);
             _syncCtx.Pump();
             WaitForActionExecutor();
             return DetectDecisionPoint();
@@ -1122,7 +1122,7 @@ public class RunSimulator
         {
             Log("Skipping event card reward");
             _cardSelector.SkipReward();
-            Thread.Sleep(50);
+            Thread.Sleep(10);
             _syncCtx.Pump();
             WaitForActionExecutor();
             return DetectDecisionPoint();
@@ -1306,7 +1306,7 @@ public class RunSimulator
         // need time to complete transitions after card selection resolves.
         if (_runState?.CurrentRoom is RestSiteRoom || _runState?.CurrentRoom is EventRoom)
         {
-            Thread.Sleep(200);
+            Thread.Sleep(20);
             _syncCtx.Pump();
             WaitForActionExecutor();
             
@@ -1322,7 +1322,7 @@ public class RunSimulator
         // Extra wait for shop card removal: the purchase task needs to finish
         if (_runState?.CurrentRoom is MerchantRoom)
         {
-            Thread.Sleep(200);
+            Thread.Sleep(20);
             _syncCtx.Pump();
             WaitForActionExecutor();
             Log("Card selection in shop (card removal), refreshing shop state");
@@ -1468,7 +1468,7 @@ public class RunSimulator
                 Log("Rest site: option chosen (non-Smith), waiting for action then detecting decision");
                 WaitForActionExecutor();
                 _syncCtx.Pump();
-                Thread.Sleep(200);
+                Thread.Sleep(20);
                 _syncCtx.Pump();
                 WaitForActionExecutor();
                 return DetectDecisionPoint();
@@ -2408,9 +2408,23 @@ public class RunSimulator
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
         _syncCtx.Pump();
 
-        // If we already chose an event option, reset the flag
+        // If we already chose an event option, wait for it to settle (transitions, sub-actions)
         if (_eventOptionChosen)
         {
+            Log("EventChoiceState: waiting for previous choice to settle...");
+            for (int i = 0; i < 40; i++) // up to 2 seconds
+            {
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+                localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
+                if (localEvent == null || localEvent.IsFinished) break;
+                // If options count changed, it's a sign the state advanced
+                if (localEvent.CurrentOptions?.Count != _lastEventOptionCount) break;
+                // If we hit another card selection, stop waiting
+                if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null) break;
+                
+                Thread.Sleep(50);
+            }
             _eventOptionChosen = false;
         }
 
@@ -2793,6 +2807,7 @@ public class RunSimulator
                 {
                     _syncCtx.Pump();
                     if (!executor.IsRunning) break;
+                    if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null) break;
                     Thread.Sleep(5);
                 }
             }
