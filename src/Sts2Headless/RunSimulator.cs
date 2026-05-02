@@ -3691,17 +3691,45 @@ public class RunSimulator
     {
         try
         {
+            // 1. Apply Damage (stable signature)
             await CreatureCmd.Damage(ctx, play.Target!, (decimal)card.DynamicVars.Damage.BaseValue,
                 MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, card);
-            await PowerCmd.Apply<WeakPower>(
-                (MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext)ctx, 
-                (MegaCrit.Sts2.Core.Entities.Creatures.Creature)play.Target!, 
-                (decimal)card.DynamicVars["WeakPower"].BaseValue,
-                (MegaCrit.Sts2.Core.Entities.Creatures.Creature)card.Owner.Creature, 
-                (MegaCrit.Sts2.Core.Models.CardModel)card, 
-                (bool)false);
+
+            // 2. Apply Weak Power using reflection to handle beta vs non-beta differences safely
+            var amount = (decimal)card.DynamicVars["WeakPower"].BaseValue;
+            var source = (Creature)card.Owner.Creature;
+            var target = (Creature)play.Target!;
+
+            var applyMethod = typeof(PowerCmd).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "Apply" && m.IsGenericMethod && (m.GetParameters().Length == 5 || m.GetParameters().Length == 6));
+
+            if (applyMethod != null)
+            {
+                var genericApply = applyMethod.MakeGenericMethod(typeof(WeakPower));
+                var parameters = genericApply.GetParameters();
+
+                object?[] args = parameters.Length == 6
+                    ? [ctx, target, amount, source, card, false]
+                    : [target, amount, source, card, false];
+
+                if (genericApply.Invoke(null, args) is Task task)
+                {
+                    await task;
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine("[WARN] Neutralize safe: Could not find PowerCmd.Apply method");
+            }
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                Console.Error.WriteLine($"  Inner: {ex.InnerException.Message}");
+            }
+        }
     }
 
         public static bool HasEntryPrefix(ref bool __result)
