@@ -261,7 +261,7 @@ public class RunSimulator
 
             // Give the engine a moment to trigger start-of-run events/choices
             _syncCtx.Pump();
-            Thread.Sleep(200);
+            Thread.Sleep(20);
             _syncCtx.Pump();
 
             // Now detect decision point
@@ -919,7 +919,7 @@ public class RunSimulator
                 if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead)
                     return DetectDecisionPoint();
                 // Brief wait for ThreadPool if sync context didn't catch it
-                Thread.Sleep(100);
+                Thread.Sleep(20);
                 _syncCtx.Pump();
                 if (!CombatManager.Instance.IsPartOfPlayerTurn(_runState!.Players[0]))
                     return DetectDecisionPoint();
@@ -2423,7 +2423,7 @@ public class RunSimulator
                 // If we hit another card selection, stop waiting
                 if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null) break;
                 
-                Thread.Sleep(50);
+                Thread.Sleep(10);
             }
             _eventOptionChosen = false;
         }
@@ -2442,7 +2442,7 @@ public class RunSimulator
             for (int i = 0; i < 5; i++)
             {
                 _syncCtx.Pump();
-                Thread.Sleep(50);
+                Thread.Sleep(10);
                 _syncCtx.Pump();
                 currentOptions = localEvent.CurrentOptions;
                 if (currentOptions != null && currentOptions.Count > 0) break;
@@ -2707,7 +2707,7 @@ public class RunSimulator
                 // Fallback: trigger the room's normal reward logic
                 treasureRoom.DoNormalRewards().GetAwaiter().GetResult();
                 _syncCtx.Pump();
-                Thread.Sleep(50);
+                Thread.Sleep(10);
                 _syncCtx.Pump();
 
                 // Try again

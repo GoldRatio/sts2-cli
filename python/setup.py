@@ -232,14 +232,6 @@ foreach (var type in module.Types)
 // Patch 3: Fix Steam API TypeLoadException
 var steamInit = module.GetType("MegaCrit.Sts2.Core.Platform.Steam.SteamInitializer");
 if (steamInit != null) {
-    var prop = steamInit.Properties.FirstOrDefault(p => p.Name == "InitResult");
-    if (prop != null) steamInit.Properties.Remove(prop);
-    var field = steamInit.Fields.FirstOrDefault(f => f.Name.Contains("InitResult"));
-    if (field != null) steamInit.Fields.Remove(field);
-    var getter = steamInit.Methods.FirstOrDefault(m => m.Name == "get_InitResult");
-    if (getter != null) steamInit.Methods.Remove(getter);
-    var setter = steamInit.Methods.FirstOrDefault(m => m.Name == "set_InitResult");
-    if (setter != null) steamInit.Methods.Remove(setter);
     var initInt = steamInit.Methods.FirstOrDefault(m => m.Name == "InitializeInternal");
     if (initInt != null && initInt.Body != null) {
         initInt.Body.Instructions.Clear();
