@@ -20,9 +20,13 @@ Expected: `Completed: 5/5` for every character.
 - All user-facing strings must go through `t(en, zh)` for bilingual support
 - Template variables like `{Damage}`, `{Block}`, `{MaxHp}` must be resolved to actual values before display
 
-## Build
+## Build & Setup
 
 ```bash
+# Full environment setup (cross-platform)
+python3 python/setup.py
+
+# Rebuild only the headless project
 ~/.dotnet-arm64/dotnet build src/Sts2Headless/Sts2Headless.csproj
 ```
 

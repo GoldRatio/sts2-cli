@@ -3,10 +3,10 @@
 sts2-cli interactive player — play Slay the Spire 2 in your terminal.
 
 Usage:
-    python3 play.py                    # Interactive mode (you play)
-    python3 play.py --auto             # Auto-play with simple AI
-    python3 play.py --seed myseed      # Fixed seed for reproducibility
-    python3 play.py --character Silent  # Choose character
+    python play.py                    # Interactive mode (you play)
+    python play.py --auto             # Auto-play with simple AI
+    python play.py --seed myseed      # Fixed seed for reproducibility
+    python play.py --character Silent  # Choose character
 """
 
 import json
@@ -15,6 +15,7 @@ import sys
 import os
 import argparse
 import random
+import shutil
 from datetime import datetime
 from game_log import GameLogger, LOG_DIR
 
@@ -31,16 +32,33 @@ def _find_dotnet():
         os.path.expanduser("~/.dotnet/dotnet"),
         "dotnet",
     ]
+    if os.name == 'nt':
+        candidates.append("dotnet.exe")
+        
     for p in candidates:
         try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5)
+            # On Windows, subprocess.run with shell=True or explicitly finding the exe is better
+            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5, shell=(os.name == 'nt'))
             if r.returncode == 0:
                 return p
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
             continue
     return None
 
 DOTNET = _find_dotnet()
+
+def init_terminal():
+    """Initialize terminal for colors and UTF-8."""
+    if os.name == 'nt':
+        # Enable ANSI escape codes in Windows 10+ console
+        os.system('color')
+        # Try to set code page to UTF-8 for better character support
+        try:
+            subprocess.run(['chcp', '65001'], capture_output=True, shell=True)
+        except:
+            pass
+
+init_terminal()
 
 
 def _find_game_dir():
@@ -66,60 +84,14 @@ def _find_game_dir():
     return None
 
 
-def _copy_dlls(game_dir):
-    """Copy required DLLs from game directory to lib/."""
-    os.makedirs(LIB_DIR, exist_ok=True)
-    dlls = [
-        "sts2.dll", "SmartFormat.dll", "SmartFormat.ZString.dll",
-        "Sentry.dll", "Steamworks.NET.dll", "MonoMod.Backports.dll",
-        "MonoMod.ILHelpers.dll", "0Harmony.dll", "System.IO.Hashing.dll",
-    ]
-    import shutil
-    for dll in dlls:
-        src = os.path.join(game_dir, dll)
-        dst = os.path.join(LIB_DIR, dll)
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            print(f"  ✓ {dll}")
-        else:
-            # Search subdirectories
-            for root_d, _, files in os.walk(game_dir):
-                if dll in files:
-                    shutil.copy2(os.path.join(root_d, dll), dst)
-                    print(f"  ✓ {dll}")
-                    break
-            else:
-                print(f"  ✗ {dll} not found")
-
-    # Backup original sts2.dll
-    sts2 = os.path.join(LIB_DIR, "sts2.dll")
-    backup = os.path.join(LIB_DIR, "sts2.dll.original")
-    if os.path.isfile(sts2) and not os.path.isfile(backup):
-        shutil.copy2(sts2, backup)
-
-
-def _patch_dll():
-    """Apply IL patches to sts2.dll using setup.sh (requires Mono.Cecil via dotnet)."""
-    setup_sh = os.path.join(ROOT, "setup.sh")
-    if not os.path.isfile(setup_sh):
-        print("  ⚠ setup.sh not found, skipping IL patch")
-        return
-    # Run just the patching part via setup.sh
-    subprocess.run(["bash", setup_sh], cwd=ROOT)
-
-
-def _build():
-    """Build the C# project."""
-    if not DOTNET:
-        return False
-    r = subprocess.run([DOTNET, "build", PROJECT], capture_output=True, text=True, timeout=60)
-    return r.returncode == 0
+    for d in candidates:
+        if os.path.isdir(d):
+            return d
+    return None
 
 
 def ensure_setup():
     """Check that everything is ready to run. Auto-setup if needed."""
-    issues = []
-
     # Check .NET SDK
     if not DOTNET:
         print("❌ .NET SDK not found.")
@@ -128,34 +100,23 @@ def ensure_setup():
 
     # Check lib/sts2.dll exists
     sts2_dll = os.path.join(LIB_DIR, "sts2.dll")
-    if not os.path.isfile(sts2_dll):
-        print("📦 Game DLLs not found. Running first-time setup...")
-        game_dir = _find_game_dir()
-        if not game_dir:
-            print("❌ Could not find Slay the Spire 2 installation.")
-            print("   Install the game via Steam, then run again.")
-            print("   Or run: ./setup.sh /path/to/game/data")
-            sys.exit(1)
-        print(f"  Found game at: {game_dir}")
-        _copy_dlls(game_dir)
-        if not os.path.isfile(sts2_dll):
-            print("❌ Failed to copy sts2.dll")
-            sys.exit(1)
-
-    # Set STS2_GAME_DIR env var for runtime DLL resolution
-    game_dir = _find_game_dir()
-    if game_dir:
-        os.environ["STS2_GAME_DIR"] = game_dir
-
-    # Check if built
     exe_dir = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0")
     exe = os.path.join(exe_dir, "Sts2Headless.dll")
-    if not os.path.isfile(exe) or os.path.getmtime(sts2_dll) > os.path.getmtime(exe):
-        print("🏗️  Building...")
-        if not _build():
-            print("❌ Build failed. Try: ./setup.sh")
+
+    if not os.path.isfile(sts2_dll) or not os.path.isfile(exe):
+        print("📦 Environment not fully set up. Running cross-platform setup...")
+        setup_py = os.path.join(ROOT, "python", "setup.py")
+        # Use sys.executable to ensure we use the same python interpreter
+        r = subprocess.run([sys.executable, setup_py], cwd=ROOT)
+        if r.returncode != 0:
+            print("❌ Setup failed.")
             sys.exit(1)
-        print("  ✓ Build succeeded")
+
+    # Set STS2_GAME_DIR env var for runtime DLL resolution if not set
+    if not os.environ.get("STS2_GAME_DIR"):
+        game_dir = _find_game_dir()
+        if game_dir:
+            os.environ["STS2_GAME_DIR"] = game_dir
 
 # Language setting (set by --lang flag)
 LANG = "en"  # "en", "zh", or "both"
@@ -1271,7 +1232,7 @@ def get_input(prompt, valid_options=None, state=None):
                 print(f"\n  {c(t('Saved games:','存档列表:'), 'bold')}")
                 for s in saves:
                     print(f"    {c(s['file'], 'cyan')}  {s['character']}  {t('Seed','种子')}:{s['seed']}  {t('Actions','操作数')}:{s['actions']}")
-                print(f"\n  {t('Load with:','读档命令:')} python3 play.py --load saves/{saves[0]['file']}")
+                print(f"\n  {t('Load with:','读档命令:')} python play.py --load saves/{saves[0]['file']}")
             else:
                 print(f"  {t('No saves found.','没有找到存档。')}")
             continue
@@ -1364,7 +1325,7 @@ def _show_quit_save_result(result):
         print(f"  {c(t('Saved!','已存档!'), 'green')} ({sz // 1024}KB)")
         if save_path:
             print(f"  {t('Save path:','存档位置:')} {c(save_path, 'cyan')}")
-            print(f"  {t('Continue later:','下次继续:')} python3 play.py --continue {save_path}")
+            print(f"  {t('Continue later:','下次继续:')} python play.py --continue {save_path}")
     elif save_result:
         print(f"  {c(t('Save failed:','存档失败:'), 'red')} {save_result.get('message', '?')}")
 
@@ -1431,7 +1392,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
         save_path = os.path.join(SAVE_DIR, fname)
         _save_game(save_path, character, actual_seed, action_log)
         print(f"  {c(t('Saved!','已存档!'), 'green')} {fname} ({len(action_log)} {t('actions','步操作')})")
-        print(f"  {t('Load with:','读档命令:')} python3 play.py --load {os.path.relpath(save_path, ROOT)}")
+        print(f"  {t('Load with:','读档命令:')} python play.py --load {os.path.relpath(save_path, ROOT)}")
 
     get_input._save_fn = do_save
     try:
@@ -2001,7 +1962,7 @@ if __name__ == "__main__":
             for s in saves:
                 print(f"  {s['file']}  {s['character']}  seed:{s['seed']}  actions:{s['actions']}")
             print(f"{'─' * 50}")
-            print(f"  Load: python3 play.py --load saves/<file>")
+            print(f"  Load: python play.py --load saves/<file>")
         else:
             print("No saves found.")
         sys.exit(0)

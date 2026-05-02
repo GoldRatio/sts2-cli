@@ -23,10 +23,10 @@ Requirements:
 ```bash
 git clone https://github.com/wuhao21/sts2-cli.git
 cd sts2-cli
-./setup.sh      # copies DLLs from Steam → IL patches → builds
+python3 python/setup.py      # copies DLLs → builds stubs → IL patches → builds
 ```
 
-Or just run `python3 python/play.py` — it auto-detects and sets up on first run.
+Or just run `python3 python/play.py` — it auto-detects and sets up everything on the first run.
 
 ## Play
 

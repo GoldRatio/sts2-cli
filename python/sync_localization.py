@@ -95,21 +95,34 @@ def sync_localization():
     try:
         # Use -o to only get the matched part, -b for offset, -a for binary
         cmd = ["grep", "-aobE", pattern, pck_path]
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode()
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, shell=(os.name == 'nt')).decode()
         for line in output.splitlines():
             if ':' in line:
                 offset_str, matched = line.split(':', 1)
                 table = marker_to_table.get(matched)
                 if table:
                     all_offsets[table].append(int(offset_str))
-    except subprocess.CalledProcessError:
-        print("  ⚠ Grep failed, falling back to sequential search")
-        for m in all_markers:
-            table = marker_to_table[m]
-            try:
-                out = subprocess.check_output(["grep", "-aob", m, pck_path]).decode()
-                all_offsets[table].extend([int(l.split(':')[0]) for l in out.splitlines() if l])
-            except: pass
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("  ⚠ Grep not found or failed, falling back to pure Python search (slower)")
+        # Pure Python fallback for finding offsets
+        with open(pck_path, 'rb') as f_in:
+            # We search in chunks to avoid loading 1.8GB into memory
+            chunk_size = 1024 * 1024 * 10 # 10MB
+            overlap = 1024 # overlap to catch markers split between chunks
+            offset = 0
+            while True:
+                chunk = f_in.read(chunk_size)
+                if not chunk: break
+                for m in all_markers:
+                    m_bytes = m.encode()
+                    p = chunk.find(m_bytes)
+                    while p != -1:
+                        table = marker_to_table[m]
+                        all_offsets[table].append(offset + p)
+                        p = chunk.find(m_bytes, p + 1)
+                offset += len(chunk)
+                f_in.seek(offset - overlap)
+                offset -= overlap
 
     with open(pck_path, 'rb') as f:
         for table, markers in TABLE_MARKERS.items():
