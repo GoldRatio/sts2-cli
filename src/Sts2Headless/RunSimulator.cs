@@ -3691,9 +3691,9 @@ public class RunSimulator
     {
         try
         {
-            await CreatureCmd.Damage(ctx, play.Target!, card.DynamicVars.Damage.BaseValue,
+            await CreatureCmd.Damage(ctx, play.Target!, (decimal)card.DynamicVars.Damage.BaseValue,
                 MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, card);
-            await PowerCmd.Apply<WeakPower>(ctx, play.Target!, card.DynamicVars["WeakPower"].BaseValue,
+            await PowerCmd.Apply(ctx, new WeakPower(), play.Target!, (decimal)card.DynamicVars["WeakPower"].BaseValue,
                 card.Owner.Creature, card, false);
         }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}"); }
