@@ -7,6 +7,27 @@ import tempfile
 import platform
 import argparse
 
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+
+_real_print = print
+def safe_print(*args, **kwargs):
+    """Print message, replacing emojis if encoding fails."""
+    try:
+        _real_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # Fallback: join args and replace common emojis
+        msg = " ".join(map(str, args))
+        msg = msg.replace("🚀", "[START]").replace("🏗️", "[BUILD]").replace("📦", "[COPY]")
+        msg = msg.replace("🔨", "[PATCH]").replace("✅", "[OK]").replace("❌", "[ERR]")
+        msg = msg.replace("✓", "[v]").replace("✗", "[x]")
+        _real_print(msg.encode('ascii', 'replace').decode('ascii'), **kwargs)
+
+print = safe_print
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB_DIR = os.path.join(ROOT, "lib")
 SRC_DIR = os.path.join(ROOT, "src")
@@ -43,7 +64,13 @@ def _get_dotnet_tfm(dotnet_path):
     try:
         r = subprocess.run([dotnet_path, "--version"], capture_output=True, text=True)
         if r.returncode == 0:
-            major = r.stdout.strip().split('.')[0]
+            v = r.stdout.strip().splitlines()[0]
+            major = v.split('.')[0]
+            if not major.isdigit():
+                import re
+                m = re.search(r'(\d+)\.', v)
+                if m: major = m.group(1)
+                else: major = "9"
             return f"net{major}.0"
     except:
         pass
@@ -145,10 +172,28 @@ def build_stubs():
             return False
 
     # Copy output DLLs to lib/
-    shutil.copy2(os.path.join(SRC_DIR, "GodotStubs", "bin", "Release", TFM, "GodotSharp.dll"), 
-                 os.path.join(LIB_DIR, "GodotSharp.dll"))
-    shutil.copy2(os.path.join(SRC_DIR, "SteamworksStubs", "bin", "Release", TFM, "Steamworks.NET.dll"), 
-                 os.path.join(LIB_DIR, "Steamworks.NET.dll"))
+    def copy_stub_dll(proj_name, dll_name):
+        src = os.path.join(SRC_DIR, proj_name, "bin", "Release", TFM, dll_name)
+        if not os.path.isfile(src):
+            # Fallback: search in bin/Release for any TFM
+            search_dir = os.path.join(SRC_DIR, proj_name, "bin", "Release")
+            found = False
+            if os.path.isdir(search_dir):
+                for root, _, files in os.walk(search_dir):
+                    if dll_name in files:
+                        src = os.path.join(root, dll_name)
+                        found = True
+                        break
+            if not found:
+                print(f"  ❌ Could not find output DLL: {dll_name}")
+                return False
+        
+        shutil.copy2(src, os.path.join(LIB_DIR, dll_name))
+        return True
+
+    if not copy_stub_dll("GodotStubs", "GodotSharp.dll"): return False
+    if not copy_stub_dll("SteamworksStubs", "Steamworks.NET.dll"): return False
+    
     print("  ✓ Stubs ready")
     return True
 

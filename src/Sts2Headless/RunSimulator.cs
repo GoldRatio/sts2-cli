@@ -836,10 +836,11 @@ public class RunSimulator
         var coord = new MapCoord((byte)col, (byte)row);
 
         Log($"Moving to map coord ({col},{row})");
-
+        
         // BUG-013: Wait for any pending actions (relic sessions, etc.) to complete before entering new room
         WaitForActionExecutor();
         _syncCtx.Pump();
+        ClearRelicSession(); // Force clear any stuck relic picking sessions
 
         // Call EnterMapCoord directly (same as what MoveToMapCoordAction does in TestMode)
         // This avoids the action executor which can swallow errors silently.
@@ -2732,8 +2733,17 @@ public class RunSimulator
                 Log($"Collecting treasure reward: {reward.GetType().Name}");
                 try
                 {
-                    reward.OnSelectWrapper().GetAwaiter().GetResult();
+                    // Use WaitForChoiceTask instead of GetResult() to allow card selections (e.g. New Leaf transform)
+                    // to pause execution and return a decision point to the user.
+                    var task = reward.OnSelectWrapper();
+                    WaitForChoiceTask(task);
                     _syncCtx.Pump();
+
+                    if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
+                    {
+                        Log("Treasure reward triggered selection, pausing collection");
+                        return DetectDecisionPoint();
+                    }
                 }
                 catch (Exception ex) { Log($"Failed to collect reward: {ex.Message}"); }
             }
@@ -3936,6 +3946,34 @@ public class RunSimulator
             // If the task triggered another selection, stop waiting so we can return the decision
             if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null) break;
             Thread.Sleep(10);
+        }
+    }
+
+    private void ClearRelicSession()
+    {
+        try
+        {
+            var coreAsm = typeof(MegaCrit.Sts2.Core.Context.LocalContext).Assembly;
+            Type? sessionType = null;
+            try {
+                sessionType = coreAsm.GetTypes().FirstOrDefault(t => t.Name == "RelicPickingSession");
+            } catch (ReflectionTypeLoadException ex) {
+                sessionType = ex.Types.FirstOrDefault(t => t?.Name == "RelicPickingSession");
+            }
+
+            if (sessionType != null)
+            {
+                var currentProp = sessionType.GetProperty("Current", BindingFlags.Public | BindingFlags.Static);
+                if (currentProp != null && currentProp.GetValue(null) != null)
+                {
+                    Log("Clearing active RelicPickingSession");
+                    currentProp.SetValue(null, null);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"ClearRelicSession failed: {ex.Message}");
         }
     }
 
