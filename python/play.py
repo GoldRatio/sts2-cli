@@ -319,7 +319,18 @@ def desc(obj, vars_dict=None):
             zh = obj.get("zh", "")
             text = en if en == zh else f"{en} ({zh})"
     elif isinstance(obj, str):
-        text = obj
+        if ('.' in obj or obj.isupper()) and (obj.endswith('.description') or obj.endswith('.title') or obj.endswith('_POWER')):
+            # Try to resolve as a localization key
+            try:
+                resolved = globals().get('loc_resolve')(obj)
+                if resolved and resolved != obj:
+                    text = resolved
+                else:
+                    text = obj
+            except:
+                text = obj
+        else:
+            text = obj
 
     if text:
         import re
@@ -492,12 +503,16 @@ def show_combat(state):
         for pw in ppowers:
             amt = pw.get("amount", 0)
             amt_str = f" {amt}" if amt and amt != 0 else ""
+            pw_name = n(pw.get('name', '?'))
+            # Better debuff detection: negative amount OR common debuff name/ID
+            is_debuff = (isinstance(amt, (int, float)) and amt < 0) or \
+                        any(x in pw_name.lower() or x in pw.get('id', '').lower() 
+                            for x in ["frail", "vulnerable", "weak", "shrink", "bleed", "burn", "constricted", "entangled", "guilty"])
+            
             pw_desc = desc(pw.get("description", ""), {"Amount": abs(amt) if isinstance(amt, (int, float)) else amt})
-            is_debuff = isinstance(amt, (int, float)) and amt < 0
             color = "red" if is_debuff else "green"
             label = t("Debuff", "减益") if is_debuff else t("Buff", "增益")
             desc_str = f": {c(pw_desc, 'dim')}" if pw_desc else ""
-            pw_name = n(pw.get('name', '?'))
             print(f"    {c(label, color)} {c(f'{pw_name}{amt_str}', color)}{desc_str}")
 
     # Character-specific: Necrobinder's Osty (show near player)
@@ -814,6 +829,24 @@ def show_rest_site(state):
         opt_desc = opt.get("name", "")
         print(f"  {mark} [{opt['index']}] {opt_name}" + (f" — {opt_desc}" if opt_desc and opt_desc != opt_id else ""))
 
+
+POWER_FALLBACKS = {
+    "FRAIL_POWER.title": {"en": "Frail", "zh": "脆弱"},
+    "FRAIL_POWER.description": {"en": "Gain 25% less Block from cards.", "zh": "从卡牌中获得的格挡减少25%。"},
+    "VULNERABLE_POWER.title": {"en": "Vulnerable", "zh": "易伤"},
+    "VULNERABLE_POWER.description": {"en": "Take 50% more damage from Attacks.", "zh": "受到攻击伤害增加50%。"},
+    "WEAK_POWER.title": {"en": "Weak", "zh": "虚弱"},
+    "WEAK_POWER.description": {"en": "Deal 25% less damage with Attacks.", "zh": "攻击造成的伤害减少25%。"},
+    "STRENGTH_POWER.title": {"en": "Strength", "zh": "力量"},
+    "STRENGTH_POWER.description": {"en": "Attacks deal {Amount} more damage.", "zh": "攻击伤害增加 {Amount} 点。"},
+    "DEXTERITY_POWER.title": {"en": "Dexterity", "zh": "敏捷"},
+    "DEXTERITY_POWER.description": {"en": "Gain {Amount} more Block from cards.", "zh": "卡牌获得的格挡增加 {Amount} 点。"},
+    "SHRINK_POWER.title": {"en": "Shrink", "zh": "收缩"},
+    "SHRINK_POWER.description": {"en": "Reduces damage dealt by [Amount].", "zh": "造成的伤害减少 [Amount] 点。"},
+    "COLOSSUS_POWER.title": {"en": "Colossus", "zh": "巨人"},
+    "COLOSSUS_POWER.description": {"en": "Increase Max HP and damage.", "zh": "增加最大生命值和伤害。"},
+}
+
 def _load_loc():
     """Load localization data for resolving event option names."""
     if not hasattr(_load_loc, '_cache'):
@@ -850,6 +883,10 @@ def loc_resolve(key):
         val_zh = cache.get(f"{table}:{key}:zh")
         if val_en:
             return n({"en": val_en, "zh": val_zh}) if val_zh else val_en
+            
+    # Fallback to hardcoded powers if missing from JSON
+    if key in POWER_FALLBACKS:
+        return n(POWER_FALLBACKS[key])
             
     # If not found, try common suffixes if the key looks like a base key
     if '.' not in key or not any(key.endswith(s) for s in ['.title', '.description', '.name', '.text']):

@@ -254,13 +254,16 @@ public class RunSimulator
             // Enter first act (generates map)
             RunManager.Instance.EnterAct(0, doTransition: true).GetAwaiter().GetResult();
             _syncCtx.Pump();
-            Log("Entered Act 0 with transition");
+            Thread.Sleep(50);
+            _syncCtx.Pump();
+            Log("Entered Act 0");
 
             // BUGFIX: On some systems, EnterAct doesn't automatically trigger the Neow event
-            // node. If we are still on map/null room, explicitly enter the starting node.
-            if ((_runState.CurrentRoom is MapRoom || _runState.CurrentRoom == null) && _runState.Map?.StartingMapPoint != null)
+            // node. If we are not in an EventRoom, explicitly enter the starting node.
+            if (!(_runState.CurrentRoom is EventRoom) && _runState.Map?.StartingMapPoint != null)
             {
                 Log("Explicitly entering Neow starting node");
+                ClearRelicSession(); // Clear any stale state from previous attempts
                 RunManager.Instance.EnterMapCoord(_runState.Map.StartingMapPoint.coord).GetAwaiter().GetResult();
                 _syncCtx.Pump();
             }
@@ -2042,6 +2045,7 @@ public class RunSimulator
                     ["name"] = _loc.Power(pw.Id.Entry),
                     ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
                     ["amount"] = pw.Amount,
+                    ["id"] = pw.Id.Entry,
                 }).ToList();
 
                 return new Dictionary<string, object?>
@@ -2063,6 +2067,7 @@ public class RunSimulator
             ["name"] = _loc.Power(pw.Id.Entry),
             ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
             ["amount"] = pw.Amount,
+            ["id"] = pw.Id.Entry,
         }).ToList();
 
         var result = new Dictionary<string, object?>
@@ -3038,7 +3043,16 @@ public class RunSimulator
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitProfileId: {ex.Message}"); }
 
         // Initialize progress data for epoch/timeline tracking
-        try { SaveManager.Instance.InitProgressData(); }
+        try { 
+            SaveManager.Instance.InitProgressData(); 
+            var progress = SaveManager.Instance.Progress;
+            if (progress != null && progress.NumberOfRuns == 0)
+            {
+                // Ensure Neow is unlocked even on fresh profiles
+                SetField(progress, "<NumberOfRuns>k__BackingField", 1);
+                Log("Initialized progression: set NumberOfRuns=1 to unlock Neow");
+            }
+        }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData: {ex.Message}"); }
 
         // Install the Task.Yield patch but keep SuppressYield=false by default.
