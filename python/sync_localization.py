@@ -39,22 +39,35 @@ def sync_localization():
     if not game_dir:
         import platform
         system = platform.system()
-        candidates = ["/media/plp/Games/SteamLibrary/steamapps/common/Slay the Spire 2"]
+        candidates = [
+            r"C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2",
+            r"C:\Program Files\Steam\steamapps\common\Slay the Spire 2",
+            r"D:\SteamLibrary\steamapps\common\Slay the Spire 2",
+            r"E:\SteamLibrary\steamapps\common\Slay the Spire 2",
+            r"G:\SteamLibrary\steamapps\common\Slay the Spire 2",
+        ]
         if system == "Linux":
             for steam in ["~/.steam/steam", "~/.local/share/Steam"]:
                 candidates.append(os.path.expanduser(f"{steam}/steamapps/common/Slay the Spire 2"))
+        elif system == "Darwin":
+            base = os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/Resources")
+            candidates.extend([
+                os.path.join(base, "data_sts2_macos_arm64"),
+                os.path.join(base, "data_sts2_macos_x86_64"),
+            ])
+            
         for d in candidates:
             if os.path.isdir(d):
                 game_dir = d
                 break
     
     if not game_dir:
-        print("❌ Could not find Slay the Spire 2 installation.")
+        print("[!] Could not find Slay the Spire 2 installation.")
         return False
 
     pck_path = os.path.join(game_dir, "SlayTheSpire2.pck")
     if not os.path.isfile(pck_path):
-        print(f"❌ Could not find SlayTheSpire2.pck at {game_dir}")
+        print(f"[!] Could not find SlayTheSpire2.pck at {game_dir}")
         return False
 
     print(f"🔍 Found game at: {game_dir}")

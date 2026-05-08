@@ -23,35 +23,42 @@ class Program
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-        // Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Exception?.Message}");
+        // Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Message}");
             e.SetObserved();
         };
 
         // Set up assembly resolution to find game DLLs
-        var libDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "lib");
-        if (!Directory.Exists(libDir))
+        string libDir = "";
+        string current = AppContext.BaseDirectory;
+        for (int i = 0; i < 10; i++)
+        {
+            var test = Path.Combine(current, "lib");
+            if (Directory.Exists(test))
+            {
+                libDir = test;
+                break;
+            }
+            var parent = Path.GetDirectoryName(current);
+            if (parent == null || parent == current) break;
+            current = parent;
+        }
+
+        if (string.IsNullOrEmpty(libDir))
             libDir = Path.Combine(AppContext.BaseDirectory, "lib");
-            
-        // Console.Error.WriteLine($"[DEBUG] libDir resolved to: {Path.GetFullPath(libDir)}");
 
         AssemblyLoadContext.Default.Resolving += (ctx, name) =>
         {
             var path = Path.Combine(libDir, name.Name + ".dll");
-            // Console.Error.WriteLine($"[DEBUG] Resolving {name.Name} at {path}");
             if (File.Exists(path))
                 return ctx.LoadFromAssemblyPath(Path.GetFullPath(path));
 
-            // Also check game directory (via STS2_GAME_DIR env var)
             var gameDir = Environment.GetEnvironmentVariable("STS2_GAME_DIR") ?? "";
             if (!string.IsNullOrEmpty(gameDir))
             {
                 path = Path.Combine(gameDir, name.Name + ".dll");
-                // Console.Error.WriteLine($"[DEBUG] Resolving {name.Name} at game dir {path}");
                 if (File.Exists(path))
                     return ctx.LoadFromAssemblyPath(path);
             }
-
-            // Console.Error.WriteLine($"[DEBUG] Failed to resolve {name.Name}");
             return null;
         };
 

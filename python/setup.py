@@ -97,6 +97,9 @@ def _find_game_dir():
         candidates = [
             r"C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2",
             r"C:\Program Files\Steam\steamapps\common\Slay the Spire 2",
+            r"D:\SteamLibrary\steamapps\common\Slay the Spire 2",
+            r"E:\SteamLibrary\steamapps\common\Slay the Spire 2",
+            r"G:\SteamLibrary\steamapps\common\Slay the Spire 2",
         ]
 
     for d in candidates:
@@ -445,6 +448,15 @@ def main():
     copy_dlls(game_dir)
     if not build_stubs():
         sys.exit(1)
+    
+    # Sync localization from game PCK to ensure latest descriptions
+    from sync_localization import sync_localization
+    try:
+        os.environ["STS2_GAME_DIR"] = game_dir
+        sync_localization()
+    except Exception as e:
+        print(f"  ⚠ Localization sync failed: {e}")
+
     if not apply_patches():
         sys.exit(1)
     if not build_headless():
