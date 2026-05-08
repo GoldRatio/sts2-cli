@@ -14,37 +14,45 @@ class Program
         WriteIndented = false,
     };
 
+    /// <summary>
+    /// Locate the directory containing sts2.dll: STS2_LIB env, walk up from BaseDirectory, then BaseDirectory/lib.
+    /// </summary>
+    private static string ResolveLibDirectory()
+    {
+        var envLib = Environment.GetEnvironmentVariable("STS2_LIB");
+        if (!string.IsNullOrWhiteSpace(envLib))
+        {
+            var p = Path.GetFullPath(envLib.Trim());
+            if (Directory.Exists(p) && File.Exists(Path.Combine(p, "sts2.dll")))
+                return p;
+        }
+
+        var dir = AppContext.BaseDirectory;
+        for (var depth = 0; depth < 16 && !string.IsNullOrEmpty(dir); depth++)
+        {
+            var candidate = Path.Combine(dir, "lib");
+            if (Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "sts2.dll")))
+                return Path.GetFullPath(candidate);
+            dir = Directory.GetParent(dir)?.FullName ?? "";
+        }
+
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "lib"));
+    }
+
     static void Main(string[] args)
     {
         // Prevent unhandled exceptions from crashing the process
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
-        // Console.Error.WriteLine($"[FATAL] Unhandled: {e.ExceptionObject}");
+            Console.Error.WriteLine($"[FATAL] Unhandled: {e.ExceptionObject}");
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-        // Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Message}");
+            Console.Error.WriteLine($"[WARN] Unobserved task exception: {e.Exception?.Message}");
             e.SetObserved();
         };
 
-        // Set up assembly resolution to find game DLLs
-        string libDir = "";
-        string current = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var test = Path.Combine(current, "lib");
-            if (Directory.Exists(test))
-            {
-                libDir = test;
-                break;
-            }
-            var parent = Path.GetDirectoryName(current);
-            if (parent == null || parent == current) break;
-            current = parent;
-        }
-
-        if (string.IsNullOrEmpty(libDir))
-            libDir = Path.Combine(AppContext.BaseDirectory, "lib");
+        var libDir = ResolveLibDirectory();
 
         AssemblyLoadContext.Default.Resolving += (ctx, name) =>
         {
@@ -52,6 +60,7 @@ class Program
             if (File.Exists(path))
                 return ctx.LoadFromAssemblyPath(Path.GetFullPath(path));
 
+            // Also check game directory (via STS2_GAME_DIR env var)
             var gameDir = Environment.GetEnvironmentVariable("STS2_GAME_DIR") ?? "";
             if (!string.IsNullOrEmpty(gameDir))
             {
@@ -59,15 +68,10 @@ class Program
                 if (File.Exists(path))
                     return ctx.LoadFromAssemblyPath(path);
             }
+
             return null;
         };
 
-        RunImpl(args);
-    }
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void RunImpl(string[] args)
-    {
         var sim = new RunSimulator();
         WriteLine(new Dictionary<string, object?> { ["type"] = "ready", ["version"] = "0.2.0" });
 
@@ -151,7 +155,8 @@ class Program
                 }
                 if (saveJson == null)
                     return new Dictionary<string, object?> { ["type"] = "error", ["message"] = "Provide 'path' or 'json' for load_save" };
-                return sim.LoadSave(saveJson);
+                var loadLang = cmd.TryGetProperty("lang", out var le) ? (le.GetString() ?? "en") : "en";
+                return sim.LoadSave(saveJson, loadLang);
             }
             case "get_map":
                 return sim.GetFullMap();

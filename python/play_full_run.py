@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
 """
 Play a full STS2 run using the headless simulator with a random agent.
+
+Usage:
+  python3 play_full_run.py <num_runs> [character]
+
+Arguments:
+  num_runs    Positive integer: number of runs to play
+  character   One of: Ironclad, Silent, Defect, Regent, Necrobinder (default: Ironclad)
+
+Examples:
+  python3 play_full_run.py 5
+  python3 play_full_run.py 3 Silent
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -10,14 +22,16 @@ import random
 import os
 from game_log import GameLogger
 
+VALID_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
+
 def _find_dotnet():
-    candidates = [os.path.expanduser("~/.dotnet-arm64/dotnet"), os.path.expanduser("~/.dotnet/dotnet"), "dotnet"]
-    if os.name == 'nt': candidates.append("dotnet.exe")
-    for p in candidates:
+    for p in [os.path.expanduser("~/.dotnet-arm64/dotnet"),
+              os.path.expanduser("~/.dotnet/dotnet"), "dotnet"]:
         try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=2, shell=(os.name == 'nt'))
-            if r.returncode == 0: return p
-        except: continue
+            if subprocess.run([p, "--version"], capture_output=True, timeout=5).returncode == 0:
+                return p
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
     return "dotnet"
 
 DOTNET = _find_dotnet()
@@ -73,6 +87,7 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                 print(f"  < {json.dumps(resp)[:200]}")
         return resp
 
+    step = 0
     try:
         # Read ready message (may need to skip build warnings)
         ready = read_json_line()
@@ -273,8 +288,22 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
 
 
 def main():
-    num_runs = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    character = sys.argv[2] if len(sys.argv) > 2 else "Ironclad"
+    parser = argparse.ArgumentParser(
+        description="Play full STS2 runs using the headless simulator with a random agent.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Valid characters: " + ", ".join(VALID_CHARACTERS),
+    )
+    parser.add_argument("num_runs", type=int, help="Number of runs to play (must be positive)")
+    parser.add_argument("character", nargs="?", default="Ironclad",
+                        choices=VALID_CHARACTERS, metavar="character",
+                        help=f"Character to play as (default: Ironclad). Choices: {', '.join(VALID_CHARACTERS)}")
+    args = parser.parse_args()
+
+    if args.num_runs <= 0:
+        parser.error(f"num_runs must be a positive integer, got {args.num_runs}")
+
+    num_runs = args.num_runs
+    character = args.character
 
     print(f"Playing {num_runs} runs as {character}")
     print("=" * 60)
