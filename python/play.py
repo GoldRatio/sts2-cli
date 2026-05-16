@@ -17,6 +17,32 @@ import argparse
 import random
 from game_log import GameLogger
 
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+
+_real_print = print
+def safe_print(*args, **kwargs):
+    """Print message, replacing emojis if encoding fails."""
+    try:
+        _real_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        msg = " ".join(map(str, args))
+        # Replace common emojis/special chars for non-UTF8 terminals
+        msg = msg.replace("🚀", "[START]").replace("🏗️", "[BUILD]").replace("📦", "[COPY]")
+        msg = msg.replace("🔨", "[PATCH]").replace("✅", "[OK]").replace("❌", "[ERR]")
+        msg = msg.replace("✓", "[v]").replace("✗", "[x]")
+        msg = msg.replace("★", "*").replace("🦴", "B").replace("⚡", "L").replace("❄", "F")
+        msg = msg.replace("🌑", "D").replace("🔆", "P").replace("💠", "G").replace("⚔", "A")
+        msg = msg.replace("🛡", "D").replace("⬆", "^").replace("⬇", "v").replace("💀", "X")
+        msg = msg.replace("🏃", "E").replace("📢", "S").replace("💤", "Z").replace("🔶", "o")
+        msg = msg.replace("🧪", "P").replace("█", "#").replace("░", "-").replace("●", "*").replace("○", ".")
+        _real_print(msg.encode('ascii', 'replace').decode('ascii'), **kwargs)
+
+print = safe_print
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT = os.path.join(ROOT, "src", "Sts2Headless", "Sts2Headless.csproj")
 LIB_DIR = os.path.join(ROOT, "lib")
@@ -30,152 +56,62 @@ def _find_dotnet():
         os.path.expanduser("~/.dotnet/dotnet"),
         "dotnet",
     ]
+    if os.name == 'nt':
+        candidates.append("dotnet.exe")
+        
     for p in candidates:
         try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5)
+            # On Windows, 'where' can help find the full path if only 'dotnet' is known
+            if p == "dotnet" and os.name == 'nt':
+                w = subprocess.run(["where", "dotnet"], capture_output=True, text=True, shell=True)
+                if w.returncode == 0:
+                    p = w.stdout.splitlines()[0].strip()
+
+            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5, shell=(os.name == 'nt' and not os.path.isabs(p)))
             if r.returncode == 0:
-                return p
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+                return os.path.abspath(p)
+        except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
             continue
     return None
 
 DOTNET = _find_dotnet()
 
 
-def _is_wsl():
-    """Check if running inside WSL."""
-    try:
-        with open("/proc/version", "r") as f:
-            return "microsoft" in f.read().lower()
-    except OSError:
-        return False
 
 
-def _find_game_dir():
-    """Auto-detect STS2 Steam install directory."""
-    import platform
-    system = platform.system()
-    candidates = []
-    if system == "Darwin":
-        base = os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/Slay the Spire 2/SlayTheSpire2.app/Contents/Resources")
-        candidates = [
-            os.path.join(base, "data_sts2_macos_arm64"),
-            os.path.join(base, "data_sts2_macos_x86_64"),
-        ]
-    elif system == "Linux":
-        if _is_wsl():
-            # WSL: scan Windows drives for Steam install
-            for drv in ["/mnt/c", "/mnt/d", "/mnt/e", "/mnt/f", "/mnt/g"]:
-                for steam in [
-                    f"{drv}/Program Files (x86)/Steam",
-                    f"{drv}/Program Files/Steam",
-                    f"{drv}/SteamLibrary",
-                    f"{drv}/Games/Steam",
-                    f"{drv}/Steam",
-                ]:
-                    d = f"{steam}/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64"
-                    candidates.append(d)
-        # Native Linux Steam
-        for steam in ["~/.steam/steam", "~/.local/share/Steam"]:
-            candidates.append(os.path.expanduser(f"{steam}/steamapps/common/Slay the Spire 2"))
-    elif system == "Windows":
-        candidates = [r"C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"]
-
-    for d in candidates:
-        if os.path.isdir(d):
-            return d
-    return None
-
-
-def _copy_dlls(game_dir):
-    """Copy required DLLs from game directory to lib/."""
-    os.makedirs(LIB_DIR, exist_ok=True)
-    dlls = [
-        "sts2.dll", "SmartFormat.dll", "SmartFormat.ZString.dll",
-        "Sentry.dll", "Steamworks.NET.dll", "MonoMod.Backports.dll",
-        "MonoMod.ILHelpers.dll", "0Harmony.dll", "System.IO.Hashing.dll",
-    ]
-    import shutil
-    for dll in dlls:
-        src = os.path.join(game_dir, dll)
-        dst = os.path.join(LIB_DIR, dll)
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            print(f"  ✓ {dll}")
-        else:
-            # Search subdirectories
-            for root_d, _, files in os.walk(game_dir):
-                if dll in files:
-                    shutil.copy2(os.path.join(root_d, dll), dst)
-                    print(f"  ✓ {dll}")
-                    break
-            else:
-                print(f"  ✗ {dll} not found")
-
-    # Backup original sts2.dll
-    sts2 = os.path.join(LIB_DIR, "sts2.dll")
-    backup = os.path.join(LIB_DIR, "sts2.dll.original")
-    if os.path.isfile(sts2) and not os.path.isfile(backup):
-        shutil.copy2(sts2, backup)
-
-
-def _patch_dll():
-    """Apply IL patches to sts2.dll using setup.sh (requires Mono.Cecil via dotnet)."""
-    setup_sh = os.path.join(ROOT, "setup.sh")
-    if not os.path.isfile(setup_sh):
-        print("  ⚠ setup.sh not found, skipping IL patch")
-        return
-    # Run just the patching part via setup.sh
-    subprocess.run(["bash", setup_sh], cwd=ROOT)
-
-
-def _build():
-    """Build the C# project."""
-    if not DOTNET:
-        return False
-    r = subprocess.run([DOTNET, "build", PROJECT], capture_output=True, text=True, timeout=60)
-    return r.returncode == 0
 
 
 def ensure_setup():
     """Check that everything is ready to run. Auto-setup if needed."""
-    issues = []
-
     # Check .NET SDK
     if not DOTNET:
         print("❌ .NET SDK not found.")
         print("   Install .NET 9+ from https://dotnet.microsoft.com/download")
         sys.exit(1)
 
-    # Check lib/sts2.dll exists
     sts2_dll = os.path.join(LIB_DIR, "sts2.dll")
-    if not os.path.isfile(sts2_dll):
-        print("📦 Game DLLs not found. Running first-time setup...")
-        game_dir = _find_game_dir()
-        if not game_dir:
-            print("❌ Could not find Slay the Spire 2 installation.")
-            print("   Install the game via Steam, then run again.")
-            print("   Or run: ./setup.sh /path/to/game/data")
+    
+    # Check if built (TFM-agnostic check)
+    built = False
+    headless_bin = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug")
+    if os.path.isdir(headless_bin):
+        for root, _, files in os.walk(headless_bin):
+            if "Sts2Headless.dll" in files:
+                built = True
+                break
+
+    if not os.path.isfile(sts2_dll) or not built:
+        print("📦 Environment not fully set up. Running setup.py...")
+        setup_script = os.path.join(ROOT, "python", "setup.py")
+        r = subprocess.run([sys.executable, setup_script], cwd=ROOT)
+        if r.returncode != 0:
+            print("❌ Setup failed.")
             sys.exit(1)
-        print(f"  Found game at: {game_dir}")
-        _copy_dlls(game_dir)
-        if not os.path.isfile(sts2_dll):
-            print("❌ Failed to copy sts2.dll")
-            sys.exit(1)
+        print("  ✓ Setup complete")
 
     # Set STS2_GAME_DIR env var for runtime DLL resolution (point to lib/ where DLLs were copied)
     if "STS2_GAME_DIR" not in os.environ:
         os.environ["STS2_GAME_DIR"] = LIB_DIR
-
-    # Check if built
-    exe_dir = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0")
-    exe = os.path.join(exe_dir, "Sts2Headless.dll")
-    if not os.path.isfile(exe) or os.path.getmtime(sts2_dll) > os.path.getmtime(exe):
-        print("🏗️  Building...")
-        if not _build():
-            print("❌ Build failed. Try: ./setup.sh")
-            sys.exit(1)
-        print("  ✓ Build succeeded")
 
 # Language setting (set by --lang flag)
 LANG = "zh"  # "en", "zh", or "both"
@@ -1498,10 +1434,12 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
     logger = GameLogger(character, actual_seed, enabled=log)
     action_log = []
+    print(f"  {c(t('Starting simulator...','正在启动模拟器...'), 'dim')}")
     proc = subprocess.Popen(
         [DOTNET, "run", "--no-build", "--project", PROJECT],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, bufsize=1,
+        stderr=None,  # Let errors show in terminal to avoid pipe blocking
+        text=True, bufsize=1,
     )
 
     def read():
@@ -2050,6 +1988,8 @@ if __name__ == "__main__":
 
     LANG = args.lang
 
+    ensure_setup()
+
     # Mutual exclusion: conflicting flags
     if args.load is not None:
         if args.saves:
@@ -2114,7 +2054,7 @@ if __name__ == "__main__":
             sys.exit(1)
         show_native_save(native_save_path)
 
-    ensure_setup()
+
     next_seed = args.seed
     next_auto = args.auto
     next_load_path = load_path

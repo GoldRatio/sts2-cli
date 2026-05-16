@@ -1008,21 +1008,17 @@ public class RunSimulator
 
     private Dictionary<string, object?> DoEndTurn(Player player)
     {
-        if (!CombatManager.Instance.IsPlayPhase)
-        {
-            // Might be between phases — pump and check
             _syncCtx.Pump();
-            if (!CombatManager.Instance.IsPlayPhase)
+            if (!IsPlayPhase())
             {
                 if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead)
                     return DetectDecisionPoint();
                 // Brief wait for ThreadPool if sync context didn't catch it
                 Thread.Sleep(100);
                 _syncCtx.Pump();
-                if (!CombatManager.Instance.IsPlayPhase)
+                if (!IsPlayPhase())
                     return DetectDecisionPoint();
             }
-        }
 
         // Ensure no actions are still running before ending turn
         WaitForActionExecutor();
@@ -1043,14 +1039,14 @@ public class RunSimulator
             _syncCtx.Pump();
 
             // Fallback: if turn didn't complete synchronously, keep pumping with SuppressYield on
-            if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
+            if (CombatManager.Instance.IsInProgress && !IsPlayPhase() && !player.Creature.IsDead)
             {
                 for (int i = 0; i < 50; i++)
                 {
                     _syncCtx.Pump();
                     if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                     if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
-                    if (CombatManager.Instance.IsPlayPhase) break;
+                    if (IsPlayPhase()) break;
                     Thread.Sleep(5);
                 }
             }
@@ -1062,7 +1058,7 @@ public class RunSimulator
 
         // Second fallback: if still stuck after SuppressYield window, cancel and retry.
         // The WaitUntilQueue TCS is likely deadlocked.
-        if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
+        if (CombatManager.Instance.IsInProgress && !IsPlayPhase() && !player.Creature.IsDead)
         {
             Log("EndTurn stuck, cancelling and retrying with SuppressYield...");
             try
@@ -1092,7 +1088,7 @@ public class RunSimulator
                     _syncCtx.Pump();
                     if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                     if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
-                    if (CombatManager.Instance.IsPlayPhase) break;
+                    if (IsPlayPhase()) break;
                     Thread.Sleep(10);
                 }
             }
@@ -1100,14 +1096,14 @@ public class RunSimulator
 
             // NUCLEAR OPTION: If STILL stuck after 2 attempts, use ThreadPool to force
             // the enemy turn processing to complete with SuppressYield permanently on.
-            if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
+            if (CombatManager.Instance.IsInProgress && !IsPlayPhase() && !player.Creature.IsDead)
             {
                 var stuckState = CombatManager.Instance.DebugOnlyGetState();
                 var stuckEnemies = stuckState?.Enemies?.Where(e => e != null && e.IsAlive)
                     .Select(e => $"{e.Monster?.GetType().Name}(hp={e.CurrentHp})").ToList();
                 Log($"EndTurn STILL stuck after retry — nuclear fallback. Round={stuckState?.RoundNumber}, " +
                     $"Enemies=[{string.Join(",", stuckEnemies ?? new())}], " +
-                    $"IsPlayPhase={CombatManager.Instance.IsPlayPhase}, " +
+                    $"IsPlayPhase={IsPlayPhase()}, " +
                     $"IsInProgress={CombatManager.Instance.IsInProgress}, " +
                     $"ActionExecutor.IsRunning={RunManager.Instance.ActionExecutor.IsRunning}");
                 try
@@ -1133,24 +1129,24 @@ public class RunSimulator
                         if (endTurnTask.IsCompleted) break;
                         if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                         if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
-                        if (CombatManager.Instance.IsPlayPhase) break;
+                        if (IsPlayPhase()) break;
                         Thread.Sleep(10);
                     }
                     YieldPatches.SuppressYield = false;
 
                     // If still not play phase, try just waiting a bit more
-                    if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
+                    if (CombatManager.Instance.IsInProgress && !IsPlayPhase() && !player.Creature.IsDead)
                     {
                         for (int i = 0; i < 200; i++)
                         {
                             _syncCtx.Pump();
                             Thread.Sleep(10);
-                            if (CombatManager.Instance.IsPlayPhase || !CombatManager.Instance.IsInProgress || player.Creature.IsDead)
+                            if (IsPlayPhase() || !CombatManager.Instance.IsInProgress || player.Creature.IsDead)
                                 break;
                         }
                     }
 
-                    if (CombatManager.Instance.IsPlayPhase)
+                    if (IsPlayPhase())
                         Log("Nuclear fallback SUCCEEDED — play phase resumed");
                     else
                     {
@@ -1281,7 +1277,8 @@ public class RunSimulator
         {
             entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
             _syncCtx.Pump();
-            Log($"Bought relic: {entry.Model.GetType().Name} for {entry.Cost}g");
+            string modelName = entry.Model?.GetType().Name ?? "Unknown";
+            Log($"Bought relic: {modelName} for {entry.Cost}g");
         }
         catch (Exception ex) { return Error($"Buy relic failed: {ex.Message}"); }
 
@@ -1307,7 +1304,8 @@ public class RunSimulator
         {
             entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
             _syncCtx.Pump();
-            Log($"Bought potion: {entry.Model.GetType().Name} for {entry.Cost}g");
+            string modelName = entry.Model?.GetType().Name ?? "Unknown";
+            Log($"Bought potion: {modelName} for {entry.Cost}g");
         }
         catch (Exception ex)
         {
@@ -1825,7 +1823,7 @@ public class RunSimulator
                 goto checkCardSelect;  // Jump back to card_select handling
             }
 
-            if (CombatManager.Instance.IsInProgress && CombatManager.Instance.IsPlayPhase)
+            if (CombatManager.Instance.IsInProgress && IsPlayPhase())
             {
                 return CombatPlayState(player);
             }
@@ -1838,7 +1836,7 @@ public class RunSimulator
             {
                 _syncCtx.Pump();
                 Thread.Sleep(5);
-                if (CombatManager.Instance.IsPlayPhase) return CombatPlayState(player);
+                if (IsPlayPhase()) return CombatPlayState(player);
                 if (!CombatManager.Instance.IsInProgress) return DetectPostCombatState(player, combatRoom);
             }
             return CombatPlayState(player);
@@ -2176,8 +2174,18 @@ public class RunSimulator
             try
             {
                 var rewardsSet = new RewardsSet(player).WithRewardsFromRoom(combatRoom);
-                var rewards = rewardsSet.GenerateWithoutOffering().GetAwaiter().GetResult();
+                // In new versions, GenerateWithoutOffering may be void or return rewards via a property
+                try {
+                    var genMethod = rewardsSet.GetType().GetMethod("GenerateWithoutOffering");
+                    var genRet = genMethod?.Invoke(rewardsSet, null);
+                    if (genRet is Task task) task.GetAwaiter().GetResult();
+                } catch { }
+
                 _syncCtx.Pump();
+
+                // Try to get rewards from common property names
+                var rewardsProp = rewardsSet.GetType().GetProperty("Rewards") ?? rewardsSet.GetType().GetProperty("Results");
+                var rewards = rewardsProp?.GetValue(rewardsSet) as IEnumerable<Reward> ?? Array.Empty<Reward>();
 
                 // Auto-collect gold and potions, but present card choices to agent
                 var cardRewards = new List<CardReward>();
@@ -2186,7 +2194,15 @@ public class RunSimulator
                     if (reward is GoldReward || reward is MegaCrit.Sts2.Core.Rewards.RelicReward
                         || reward is MegaCrit.Sts2.Core.Rewards.PotionReward)
                     {
-                        try { reward.OnSelectWrapper().GetAwaiter().GetResult(); _syncCtx.Pump(); }
+                        try {
+                            // OnSelectWrapper missing in beta - use reflection for OnSelect/Claim
+                            var method = reward.GetType().GetMethod("OnSelect") ?? reward.GetType().GetMethod("Claim");
+                            if (method != null) {
+                                var ret = method.Invoke(reward, null);
+                                if (ret is Task task) task.GetAwaiter().GetResult();
+                            }
+                            _syncCtx.Pump();
+                        }
                         catch (Exception ex) { Log($"Auto-collect reward: {ex.Message}"); }
                     }
                     else if (reward is CardReward cr)
@@ -2198,7 +2214,7 @@ public class RunSimulator
                 if (cardRewards.Count > 0)
                 {
                     _pendingCardReward = cardRewards[0];
-                    _pendingRewards = rewards;
+                    _pendingRewards = rewards.ToList();
                     return CardRewardState(player, combatRoom);
                 }
 
@@ -2661,11 +2677,37 @@ public class RunSimulator
         {
             _syncCtx.Pump();
             if (!CombatManager.Instance.IsInProgress) return;
-            if (CombatManager.Instance.IsPlayPhase) return;
+            if (IsPlayPhase()) return;
             WaitForActionExecutor();
-            if (CombatManager.Instance.IsPlayPhase || !CombatManager.Instance.IsInProgress) return;
+            if (IsPlayPhase() || !CombatManager.Instance.IsInProgress) return;
             Thread.Sleep(5);
         }
+    }
+
+    private bool IsPlayPhase()
+    {
+        try
+        {
+            // Try original property name
+            var prop = CombatManager.Instance.GetType().GetProperty("IsPlayPhase");
+            if (prop != null) return (bool)(prop.GetValue(CombatManager.Instance) ?? false);
+
+            // Try common alternative names
+            prop = CombatManager.Instance.GetType().GetProperty("IsPlayerTurnStarted") ?? 
+                   CombatManager.Instance.GetType().GetProperty("IsPlayerTurn") ??
+                   CombatManager.Instance.GetType().GetProperty("IsPartOfPlayerTurn");
+            if (prop != null) return (bool)(prop.GetValue(CombatManager.Instance) ?? false);
+
+            // Try Phase enum check
+            var phaseProp = CombatManager.Instance.GetType().GetProperty("Phase");
+            if (phaseProp != null)
+            {
+                var phase = phaseProp.GetValue(CombatManager.Instance)?.ToString() ?? "";
+                return phase.Contains("Play") || phase.Contains("PlayerTurn");
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>Compute what a card would look like after upgrading (stats + cost + description).</summary>
@@ -3058,6 +3100,51 @@ public class RunSimulator
         private ManualResetEventSlim? _rewardWait;
         private int _rewardChoice = -1;
 
+#if STS2_BETA
+        public CardRewardSelection GetSelectedCardReward(
+            IReadOnlyList<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> options,
+            IReadOnlyList<CardRewardAlternative> alternatives)
+        {
+            if (options.Count == 0) return default;
+
+            // Store pending and block until main loop resolves
+            PendingRewardCards = options.ToList();
+            _rewardChoice = -1;
+            _rewardWait = new ManualResetEventSlim(false);
+
+            Console.Error.WriteLine($"[SIM] Card reward pending: {options.Count} cards (blocking)");
+            _rewardWait.Wait(TimeSpan.FromSeconds(300)); // Wait up to 5 min
+
+            var choice = _rewardChoice;
+            PendingRewardCards = null;
+            _rewardWait = null;
+
+            if (choice >= 0 && choice < options.Count)
+            {
+                // In beta, CardRewardSelection likely has a constructor or factory for the selected card
+                // Try creating via reflection to handle signature changes
+                try {
+                    var type = typeof(CardRewardSelection);
+                    var card = options[choice].Card;
+                    // Try constructor with CardModel
+                    var ctor = type.GetConstructor(new[] { typeof(CardModel) });
+                    if (ctor != null) return (CardRewardSelection)ctor.Invoke(new object[] { card });
+                    
+                    // Try factory methods
+                    var factory = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .FirstOrDefault(m => m.Name.Contains("Card") && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(CardModel));
+                    if (factory != null) {
+                        var res = factory.Invoke(null, new object[] { card });
+                        if (res != null) return (CardRewardSelection)res;
+                    }
+
+                    return default;
+                }
+                catch { return default; }
+            }
+            return default;
+        }
+#else
         public CardModel? GetSelectedCardReward(
             IReadOnlyList<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> options,
             IReadOnlyList<CardRewardAlternative> alternatives)
@@ -3080,6 +3167,7 @@ public class RunSimulator
                 return options[choice].Card;
             return null;  // Skip
         }
+#endif
 
         public bool HasPendingReward => PendingRewardCards != null && _rewardWait != null;
 
@@ -3409,8 +3497,35 @@ public class RunSimulator
             {
                 await CreatureCmd.Damage(ctx, play.Target!, card.DynamicVars.Damage.BaseValue,
                     MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, card);
-                await PowerCmd.Apply<WeakPower>(play.Target!, card.DynamicVars["WeakPower"].BaseValue,
-                    card.Owner.Creature, card);
+                
+                // PowerCmd.Apply signature changed — use reflection to find the best match
+                try {
+                    var applyMethod = typeof(PowerCmd).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .FirstOrDefault(m => m.Name == "Apply" && m.IsGenericMethod && m.GetParameters().Length >= 2);
+                    if (applyMethod != null) {
+                        var generic = applyMethod.MakeGenericMethod(typeof(WeakPower));
+                        var args = new List<object?>();
+                        var parameters = applyMethod.GetParameters();
+                        
+                        // Basic args: target and amount
+                        args.Add(play.Target!);
+                        args.Add(card.DynamicVars["WeakPower"].BaseValue);
+                        
+                        // Optional args based on parameter count
+                        if (parameters.Length >= 3) {
+                            if (parameters[2].ParameterType.IsAssignableFrom(typeof(Creature)))
+                                args.Add(card.Owner.Creature);
+                            else
+                                args.Add(null);
+                        }
+                        while (args.Count < parameters.Length) args.Add(null);
+
+                        var result = generic.Invoke(null, args.ToArray());
+                        if (result is Task t) await t;
+                    }
+                } catch {
+                    // Fallback if that also fails
+                }
             }
             catch (Exception ex) { Console.Error.WriteLine($"[WARN] Neutralize safe: {ex.Message}"); }
         }

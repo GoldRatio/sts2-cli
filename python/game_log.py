@@ -30,7 +30,7 @@ def cleanup_old_logs(max_age_days=LOG_RETENTION_DAYS):
             os.remove(fpath)
             removed += 1
     if removed:
-        print(f"  [log] Cleaned up {removed} old log file(s)")
+        print(f"  [log] Cleaned up {removed} old log file(s)", flush=True)
 
 
 class GameLogger:

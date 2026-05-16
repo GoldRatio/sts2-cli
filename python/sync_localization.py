@@ -94,7 +94,7 @@ def sync_localization():
     results = {"eng": 0, "zhs": 0}
 
     # Optimization: Find all offsets in one pass to save time on 1.8GB file
-    print(f"  Scanning for all tables in one pass (this may take a minute)...")
+    print(f"  Scanning for all tables in one pass...")
     marker_to_table = {}
     all_markers = []
     for table, markers in TABLE_MARKERS.items():
@@ -102,40 +102,41 @@ def sync_localization():
             marker_to_table[m] = table
             all_markers.append(m)
 
-    pattern = "|".join(re.escape(m) for m in all_markers)
+    # Compile binary regex for all markers
+    pattern_bytes = b"|".join(re.escape(m.encode()) for m in all_markers)
+    regex = re.compile(pattern_bytes)
     all_offsets = {table: [] for table in TABLE_MARKERS}
-    
-    try:
-        # Use -o to only get the matched part, -b for offset, -a for binary
-        cmd = ["grep", "-aobE", pattern, pck_path]
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, shell=(os.name == 'nt')).decode()
-        for line in output.splitlines():
-            if ':' in line:
-                offset_str, matched = line.split(':', 1)
-                table = marker_to_table.get(matched)
-                if table:
-                    all_offsets[table].append(int(offset_str))
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("  ⚠ Grep not found or failed, falling back to pure Python search (slower)")
-        # Pure Python fallback for finding offsets
-        with open(pck_path, 'rb') as f_in:
-            # We search in chunks to avoid loading 1.8GB into memory
-            chunk_size = 1024 * 1024 * 10 # 10MB
-            overlap = 1024 # overlap to catch markers split between chunks
+
+    # Efficiently search the large binary file
+    with open(pck_path, 'rb') as f_in:
+        # Memory map the file for high performance if possible
+        import mmap
+        try:
+            with mmap.mmap(f_in.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                for match in regex.finditer(mm):
+                    matched_bytes = match.group()
+                    table = marker_to_table.get(matched_bytes.decode())
+                    if table:
+                        all_offsets[table].append(match.start())
+        except (ValueError, OSError, EnvironmentError):
+            # Fallback to chunked reading if mmap fails (e.g., 32-bit system or OS limitation)
+            chunk_size = 1024 * 1024 * 50 # 50MB chunks
+            overlap = 1024
             offset = 0
             while True:
                 chunk = f_in.read(chunk_size)
                 if not chunk: break
-                for m in all_markers:
-                    m_bytes = m.encode()
-                    p = chunk.find(m_bytes)
-                    while p != -1:
-                        table = marker_to_table[m]
-                        all_offsets[table].append(offset + p)
-                        p = chunk.find(m_bytes, p + 1)
+                for match in regex.finditer(chunk):
+                    matched_bytes = match.group()
+                    table = marker_to_table.get(matched_bytes.decode())
+                    if table:
+                        all_offsets[table].append(offset + match.start())
+                
                 offset += len(chunk)
-                f_in.seek(offset - overlap)
-                offset -= overlap
+                # Ensure we don't miss markers split across chunks
+                if len(chunk) == chunk_size:
+                    f_in.seek(offset - overlap)
+                    offset -= overlap
 
     with open(pck_path, 'rb') as f:
         for table, markers in TABLE_MARKERS.items():
