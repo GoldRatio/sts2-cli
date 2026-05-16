@@ -984,17 +984,20 @@ public class RunSimulator
 
     private Dictionary<string, object?> DoEndTurn(Player player)
     {
+        if (!IsPlayPhase())
+        {
+            Log($"DoEndTurn: Not play phase (IsInProgress={CombatManager.Instance.IsInProgress}, dead={player.Creature.IsDead})");
+            if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead)
+                return DetectDecisionPoint();
+            // Brief wait for ThreadPool if sync context didn't catch it
+            Thread.Sleep(100);
             _syncCtx.Pump();
             if (!IsPlayPhase())
             {
-                if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead)
-                    return DetectDecisionPoint();
-                // Brief wait for ThreadPool if sync context didn't catch it
-                Thread.Sleep(100);
-                _syncCtx.Pump();
-                if (!IsPlayPhase())
-                    return DetectDecisionPoint();
+                Log("DoEndTurn: Still not play phase after pump/wait");
+                return DetectDecisionPoint();
             }
+        }
 
         // Ensure no actions are still running before ending turn
         WaitForActionExecutor();
@@ -2664,23 +2667,64 @@ public class RunSimulator
     {
         try
         {
-            // Try original property name
-            var prop = CombatManager.Instance.GetType().GetProperty("IsPlayPhase");
-            if (prop != null) return (bool)(prop.GetValue(CombatManager.Instance) ?? false);
+            var cm = CombatManager.Instance;
+            if (cm == null) return false;
+            var type = cm.GetType();
+            var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | 
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static |
+                        System.Reflection.BindingFlags.FlattenHierarchy;
 
-            // Try common alternative names
-            prop = CombatManager.Instance.GetType().GetProperty("IsPlayerTurnStarted") ?? 
-                   CombatManager.Instance.GetType().GetProperty("IsPlayerTurn") ??
-                   CombatManager.Instance.GetType().GetProperty("IsPartOfPlayerTurn");
-            if (prop != null) return (bool)(prop.GetValue(CombatManager.Instance) ?? false);
+            // 1. Try IsEnemyTurnStarted + PlayerActionsDisabled (Found in current beta)
+            var enemyTurnStartedProp = type.GetProperty("IsEnemyTurnStarted", flags);
+            if (enemyTurnStartedProp != null)
+            {
+                var enemyTurnStarted = (bool)(enemyTurnStartedProp.GetValue(cm) ?? false);
+                var actionsDisabledProp = type.GetProperty("PlayerActionsDisabled", flags);
+                var actionsDisabled = actionsDisabledProp != null && (bool)(actionsDisabledProp.GetValue(cm) ?? false);
+                
+                // If enemy turn hasn't started and actions aren't disabled, it's likely play phase
+                if (!enemyTurnStarted && !actionsDisabled) return true;
+                if (enemyTurnStarted) return false;
+            }
 
-            // Try Phase enum check
-            var phaseProp = CombatManager.Instance.GetType().GetProperty("Phase");
+            // 2. Try CanTurnBeEnded
+            var canEndProp = type.GetProperty("CanTurnBeEnded", flags) ?? type.GetProperty("get_CanTurnBeEnded", flags);
+            if (canEndProp != null)
+            {
+                if ((bool)(canEndProp.GetValue(cm) ?? false)) return true;
+            }
+
+            // 3. Fallbacks for original/other versions
+            var prop = type.GetProperty("IsPlayPhase", flags) ?? 
+                       type.GetProperty("IsPlayerTurnStarted", flags) ?? 
+                       type.GetProperty("IsPlayerTurn", flags) ??
+                       type.GetProperty("IsPartOfPlayerTurn", flags);
+            if (prop != null) return (bool)(prop.GetValue(cm) ?? false);
+
+            // 4. Try CurrentSide
+            var sideProp = type.GetProperty("CurrentSide", flags);
+            if (sideProp != null)
+            {
+                var sideValue = sideProp.GetValue(cm)?.ToString() ?? "";
+                if (sideValue == "Player") return true;
+            }
+
+            // 5. Try Phase enum check (Property or Field)
+            var phaseProp = type.GetProperty("Phase", flags) ?? type.GetProperty("PlayerTurnPhase", flags);
+            string phase = "None";
             if (phaseProp != null)
             {
-                var phase = phaseProp.GetValue(CombatManager.Instance)?.ToString() ?? "";
-                return phase.Contains("Play") || phase.Contains("PlayerTurn");
+                phase = phaseProp.GetValue(cm)?.ToString() ?? "None";
             }
+            else
+            {
+                var phaseField = type.GetField("Phase", flags) ?? type.GetField("PlayerTurnPhase", flags);
+                if (phaseField != null)
+                    phase = phaseField.GetValue(cm)?.ToString() ?? "None";
+            }
+
+            if (phase.Contains("Play") || phase.Contains("PlayerTurn") || phase == "Action")
+                return true;
         }
         catch { }
         return false;
