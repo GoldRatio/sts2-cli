@@ -113,8 +113,8 @@ def ensure_setup():
     if "STS2_GAME_DIR" not in os.environ:
         os.environ["STS2_GAME_DIR"] = LIB_DIR
 
-# Language setting (set by --lang flag)
-LANG = "zh"  # "en", "zh", or "both"
+# Language setting
+LANG = "en"
 
 # ─── Native save file support ───
 
@@ -188,7 +188,7 @@ def show_native_save(save_path):
     if room:
         room_type = room.get("room_type", "?")
         enc = room.get("encounter_id") or room.get("event_id") or ""
-        room_type_display = t(room_type, ROOM_TYPE_ZH.get(room_type, room_type))
+        room_type_display = t(room_type, ROOM_TYPE_TEXT.get(room_type, room_type))
         print(f"  {t('Room','当前房间')}: {room_type_display}" + (f" ({_id_to_name(enc)})" if enc else ""))
 
     visited = data.get("visited_map_coords", [])
@@ -325,53 +325,47 @@ def bar(current, maximum, width=20):
     return c("█" * filled, "red") + c("░" * (width - filled), "dim")
 
 def t(en, zh=None):
-    """Translate UI string based on LANG setting."""
-    if zh is None:
-        return en
-    if LANG == "en":
-        return en
-    if LANG == "both":
-        return f"{en} / {zh}"
-    return zh
+    """Translate UI string (now always English)."""
+    return en
 
-# Card rarities — keys match sts2 CardRarity.ToString(); ZHS from localization_zhs/gameplay_ui.json CARD_RARITY.*
-RARITY_ZH = {
-    "Basic": "基础",
-    "Common": "普通",
-    "Uncommon": "罕见",
-    "Rare": "稀有",
-    "Curse": "诅咒",
-    "Status": "状态",
-    "Token": "衍生",
-    "Event": "事件",
-    "Quest": "任务",
-    "Ancient": "先古",
+# Card rarities
+RARITY_TEXT = {
+    "Basic": "Basic",
+    "Common": "Common",
+    "Uncommon": "Uncommon",
+    "Rare": "Rare",
+    "Curse": "Curse",
+    "Status": "Status",
+    "Token": "Token",
+    "Event": "Event",
+    "Quest": "Quest",
+    "Ancient": "Ancient",
 }
-# Matches localization_zhs/card_keywords.json (display only)
-CARD_KW_ZH = {
-    "Exhaust": "消耗", "Innate": "固有", "Ethereal": "虚无", "Retain": "保留",
-    "Sly": "奇巧", "Eternal": "永恒", "Unplayable": "不能被打出",
+# Card keywords
+CARD_KW_TEXT = {
+    "Exhaust": "Exhaust", "Innate": "Innate", "Ethereal": "Ethereal", "Retain": "Retain",
+    "Sly": "Sly", "Eternal": "Eternal", "Unplayable": "Unplayable",
 }
 # End of title line (restrictive / rules)
 CARD_KW_SUFFIX_ORDER = ("Exhaust", "Unplayable", "Eternal")
 # Before description as [A/B/C]
 CARD_KW_PREFIX_ORDER = ("Innate", "Ethereal", "Retain", "Sly")
 
-CARD_TYPE_ZH = {"Attack": "攻击", "Skill": "技能", "Power": "能力", "Status": "状态", "Curse": "诅咒"}
-NODE_TYPE_ZH = {"Monster": "怪物", "Elite": "精英", "Boss": "Boss", "RestSite": "休息处",
-                "Shop": "商店", "Treasure": "宝箱", "Event": "事件", "Unknown": "未知", "Ancient": "远古",
-                "CombatRoom": "战斗", "EliteRoom": "精英", "BossRoom": "Boss",
-                "RestSiteRoom": "休息站", "ShopRoom": "商店", "EventRoom": "事件",
-                "TreasureRoom": "宝箱", "MapRoom": "地图"}
-ROOM_TYPE_ZH = {
-    "CombatRoom": "战斗",
-    "EventRoom": "事件",
-    "RestSiteRoom": "休息站",
-    "ShopRoom": "商店",
-    "TreasureRoom": "宝箱",
+CARD_TYPE_TEXT = {"Attack": "Attack", "Skill": "Skill", "Power": "Power", "Status": "Status", "Curse": "Curse"}
+NODE_TYPE_TEXT = {"Monster": "Monster", "Elite": "Elite", "Boss": "Boss", "RestSite": "Rest",
+                "Shop": "Shop", "Treasure": "Treasure", "Event": "Event", "Unknown": "Unknown", "Ancient": "Ancient",
+                "CombatRoom": "Combat", "EliteRoom": "Elite", "BossRoom": "Boss",
+                "RestSiteRoom": "Rest", "ShopRoom": "Shop", "EventRoom": "Event",
+                "TreasureRoom": "Treasure", "MapRoom": "Map"}
+ROOM_TYPE_TEXT = {
+    "CombatRoom": "Combat",
+    "EventRoom": "Event",
+    "RestSiteRoom": "Rest",
+    "ShopRoom": "Shop",
+    "TreasureRoom": "Treasure",
     "BossRoom": "Boss",
-    "EliteRoom": "精英",
-    "MapRoom": "地图",
+    "EliteRoom": "Elite",
+    "MapRoom": "Map",
 }
 
 # ─── Game display ───
@@ -420,7 +414,7 @@ def card_desc(card):
 
 
 def _card_kw_label(kw):
-    return t(kw, CARD_KW_ZH.get(kw, kw))
+    return t(kw, CARD_KW_TEXT.get(kw, kw))
 
 
 def split_card_keywords(keywords):
@@ -573,11 +567,11 @@ def show_player(p, show_deck=False):
             print(f"  {c(t('Deck:','牌组:'), 'bold')}")
             for cd in cards:
                 up = c("+", "green") if cd.get("upgraded") else ""
-                ctype_zh = CARD_TYPE_ZH.get(cd.get("type",""), cd.get("type",""))
+                ctype_zh = CARD_TYPE_TEXT.get(cd.get("type",""), cd.get("type",""))
                 _pre, suf = split_card_keywords(cd.get("keywords"))
                 suf_part = format_card_suffix_keywords(suf)
                 rare = cd.get("rarity")
-                rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
+                rare_part = f" {c(t(rare, RARITY_TEXT.get(rare, rare)), 'dim')}" if rare else ""
                 print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(t(cd.get('type',''), ctype_zh), 'dim')}{rare_part}{suf_part}")
                 print_card_detail_extension(cd, indent="      ")
 
@@ -756,7 +750,7 @@ def show_map(state, send_fn=None):
     }
     for i, ch in enumerate(choices):
         icon = type_icons.get(ch["type"], "?")
-        ntype = t(ch["type"], NODE_TYPE_ZH.get(ch["type"], ch["type"]))
+        ntype = t(ch["type"], NODE_TYPE_TEXT.get(ch["type"], ch["type"]))
         print(f"  [{i}] {icon} {ntype}")
 
 def _format_upgrade_preview(stats, aug, current_cost=None):
@@ -825,7 +819,7 @@ def show_card_reward(state):
         rarity = card.get("rarity", "Common")
         cost = card.get("cost", "?")
         type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta"}.get(ctype, "reset")
-        rarity_zh = RARITY_ZH.get(rarity, rarity)
+        rarity_zh = RARITY_TEXT.get(rarity, rarity)
         rarity_label = t(rarity, rarity_zh)
         rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
         _pre, suf = split_card_keywords(card.get("keywords"))
@@ -852,7 +846,7 @@ def show_shop(state):
         cost = card.get("cost", 0)
         affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
-        ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
+        ctype_zh = CARD_TYPE_TEXT.get(card.get("type",""), card.get("type",""))
         cc = card.get("card_cost", "?")
         _pre, suf = split_card_keywords(card.get("keywords"))
         suf_part = format_card_suffix_keywords(suf)
@@ -886,7 +880,7 @@ def show_shop(state):
 
     print(f"\n  [leave] {t('Leave shop','离开商店')}")
 
-REST_OPTIONS_ZH = {"HEAL": "休息", "SMITH": "升级", "LIFT": "锻炼", "DIG": "挖掘", "RECALL": "回忆", "TOKE": "吸食"}
+REST_OPTIONS_TEXT = {"HEAL": "Rest", "SMITH": "Smith", "LIFT": "Lift", "DIG": "Dig", "RECALL": "Recall", "TOKE": "Toke"}
 
 def show_rest_site(state):
     print(f"\n{'─' * 60}")
@@ -900,7 +894,7 @@ def show_rest_site(state):
         enabled = opt.get("is_enabled", True)
         mark = c("●", "green") if enabled else c("○", "dim")
         opt_id = opt.get("option_id", "?")
-        opt_name = t(opt_id, REST_OPTIONS_ZH.get(opt_id, opt_id))
+        opt_name = t(opt_id, REST_OPTIONS_TEXT.get(opt_id, opt_id))
         opt_desc = opt.get("name", "")
         print(f"  {mark} [{opt['index']}] {opt_name}" + (f" — {opt_desc}" if opt_desc and opt_desc != opt_id else ""))
 
@@ -909,24 +903,22 @@ def _load_loc():
     if not hasattr(_load_loc, '_cache'):
         _load_loc._cache = {}
         base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        for lang in ['localization_eng', 'localization_zhs']:
-            d = os.path.join(base, lang)
-            if os.path.isdir(d):
-                for f in os.listdir(d):
-                    if f.endswith('.json'):
-                        try:
-                            data = json.load(open(os.path.join(d, f)))
-                            table = f[:-5]
-                            if table not in _load_loc._cache:
-                                _load_loc._cache[table] = {}
-                            for k, v in data.items():
-                                key = f"{table}:{k}"
-                                if key not in _load_loc._cache:
-                                    _load_loc._cache[key] = v
-                                elif lang == 'localization_zhs':
-                                    _load_loc._cache[key + ':zh'] = v
-                        except Exception:
-                            pass
+        lang = 'localization_eng'
+        d = os.path.join(base, lang)
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                if f.endswith('.json'):
+                    try:
+                        data = json.load(open(os.path.join(d, f)))
+                        table = f[:-5]
+                        if table not in _load_loc._cache:
+                            _load_loc._cache[table] = {}
+                        for k, v in data.items():
+                            key = f"{table}:{k}"
+                            if key not in _load_loc._cache:
+                                _load_loc._cache[key] = v
+                    except Exception:
+                        pass
     return _load_loc._cache
 
 def loc_resolve(key):
@@ -1155,7 +1147,7 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
             col, row = inv[i]
             nd = node_map.get((col, row))
             if nd:
-                ntype = t(nd.get("type", "?"), NODE_TYPE_ZH.get(nd.get("type", ""), nd.get("type", "?")))
+                ntype = t(nd.get("type", "?"), NODE_TYPE_TEXT.get(nd.get("type", ""), nd.get("type", "?")))
                 parts.append(f"{c(str(i), 'yellow')}={ntype}")
         print(f"  {' '.join(parts)}")
     print()
@@ -1193,29 +1185,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
 
         # Meta-commands available at any prompt
         if raw == "help":
-            if LANG == "zh":
-                print(f"""
-  {c('命令:', 'bold')}
-    {c('help', 'cyan')}     — 帮助
-    {c('map', 'cyan')}      — 显示地图
-    {c('deck', 'cyan')}     — 查看牌组
-    {c('potions', 'cyan')}  — 查看药水
-    {c('relics', 'cyan')}   — 查看遗物
-    {c('quit', 'cyan')}     — 退出
-    {c('save', 'cyan')}     — 存档
-    {c('saves', 'cyan')}    — 查看存档列表
-
-  {c('操作:', 'bold')}
-    地图:    输入路径编号 (0, 1, 2)
-    战斗:    卡牌编号 / {c('e', 'yellow')} 结束回合 / {c('p0', 'yellow')} 使用药水
-    奖励:    卡牌编号 / {c('s', 'yellow')} 跳过
-    多选:    按提示选择张数（须选 N–M 张 / 可选 0–M 张等），编号逗号分隔，例如 {c('0,1,2', 'yellow')}
-    休息:    选项编号
-    事件:    选项编号 / {c('leave', 'yellow')} 离开
-    商店:    {c('c0', 'yellow')} 买卡 / {c('r0', 'yellow')} 遗物 / {c('p0', 'yellow')} 药水 / {c('rm', 'yellow')} 移除 / {c('leave', 'yellow')} 离开
-""")
-            else:
-                print(f"""
+            print(f"""
   {c('Commands:', 'bold')}
     {c('help', 'cyan')}     — show this help
     {c('map', 'cyan')}      — show map
@@ -1751,10 +1721,10 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 cards = state.get("cards", [])
                 for cd in cards:
                     up = c("+", "green") if cd.get("upgraded") else ""
-                    ctype_zh = CARD_TYPE_ZH.get(cd.get("type", ""), cd.get("type", ""))
+                    ctype_zh = CARD_TYPE_TEXT.get(cd.get("type", ""), cd.get("type", ""))
                     ctype_label = t(cd.get("type", ""), ctype_zh)
                     rare = cd.get("rarity")
-                    rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
+                    rare_part = f" {c(t(rare, RARITY_TEXT.get(rare, rare)), 'dim')}" if rare else ""
                     _p, sf = split_card_keywords(cd.get("keywords"))
                     sp = format_card_suffix_keywords(sf)
                     print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(ctype_label, 'dim')}{rare_part}{sp}")

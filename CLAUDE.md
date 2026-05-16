@@ -15,9 +15,7 @@ Expected: `Completed: 5/5` for every character.
 
 ## Localization
 
-- Always use the game's official Chinese translations (from `localization_zhs/`)
-- Never invent translations — look them up
-- All user-facing strings must go through `t(en, zh)` for bilingual support
+- Source strings from `localization_eng/` (game's official English translations)
 - Template variables like `{Damage}`, `{Block}`, `{MaxHp}` must be resolved to actual values before display
 
 ## Build & Setup
@@ -27,7 +25,7 @@ Expected: `Completed: 5/5` for every character.
 python3 python/setup.py
 
 # Rebuild only the headless project
-~/.dotnet-arm64/dotnet build src/Sts2Headless/Sts2Headless.csproj
+dotnet build src/Sts2Headless/Sts2Headless.csproj
 ```
 
 ## Key Architecture
@@ -38,4 +36,4 @@ python3 python/setup.py
 - `python/play.py` — interactive terminal player
 - `python/play_full_run.py` — batch testing tool
 - `lib/` — game DLLs (not in repo, copied by setup.sh)
-- `localization_eng/`, `localization_zhs/` — bilingual loc data
+- `localization_eng/` — official English loc data

@@ -9,10 +9,7 @@ def get_language_score(data_dict, lang):
     Score the language of a localization dictionary.
     """
     sample = " ".join(str(v) for v in list(data_dict.values())[:300]).lower()
-    if lang == "zhs":
-        count = sum(1 for char in sample if '\u4e00' <= char <= '\u9fff')
-        return count
-    elif lang == "eng":
+    if lang == "eng":
         score = 0
         # Common English words
         for w in [" the ", " gain ", " deal ", " draw ", " block ", " card ", " your ", " of ", " to ", " will be ", " future ", " is ", " an ", " on ", " deal ", " damage ", " attack ", " you "]:
@@ -91,7 +88,7 @@ def sync_localization():
         "modifiers": ["DRAFT.title"],
     }
 
-    results = {"eng": 0, "zhs": 0}
+    results = {"eng": 0}
 
     # Optimization: Find all offsets in one pass to save time on 1.8GB file
     print(f"  Scanning for all tables in one pass...")
@@ -149,7 +146,6 @@ def sync_localization():
             print(f"    Offsets: {offsets}")
             
             merged_eng = {}
-            merged_zhs = {}
             seen_hashes = set()
             
             for offset in offsets:
@@ -236,15 +232,11 @@ def sync_localization():
                 
                 if parsed and parsed != "seen":
                     eng_score = get_language_score(parsed, "eng")
-                    zhs_score = get_language_score(parsed, "zhs")
                     
                     # Be more lenient for small blocks: score > 20 is enough if it's the best match
-                    if eng_score > 20 and eng_score > zhs_score:
+                    if eng_score > 20:
                         merged_eng.update(parsed)
                         print(f"      + Merged English block (score: {eng_score}, keys: {len(parsed)})")
-                    elif zhs_score > 50 and zhs_score > eng_score:
-                        merged_zhs.update(parsed)
-                        print(f"      + Merged Chinese block (score: {zhs_score}, keys: {len(parsed)})")
             
             if merged_eng:
                 os.makedirs("localization_eng", exist_ok=True)
@@ -252,15 +244,8 @@ def sync_localization():
                     json.dump(merged_eng, out_f, indent=2, ensure_ascii=False)
                 results["eng"] += 1
                 print(f"    ✅ eng/{table}.json extracted ({len(merged_eng)} keys)")
-            
-            if merged_zhs:
-                os.makedirs("localization_zhs", exist_ok=True)
-                with open(os.path.join("localization_zhs", f"{table}.json"), 'w', encoding='utf-8') as out_f:
-                    json.dump(merged_zhs, out_f, indent=2, ensure_ascii=False)
-                results["zhs"] += 1
-                print(f"    ✅ zhs/{table}.json extracted ({len(merged_zhs)} keys)")
 
-    print(f"✅ Sync complete! Updated {results['eng']} English tables and {results['zhs']} Chinese tables.")
+    print(f"✅ Sync complete! Updated {results['eng']} English tables.")
     return True
 
 if __name__ == "__main__":

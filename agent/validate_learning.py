@@ -16,15 +16,9 @@ def load_names_db():
     global _names_db
     if _names_db is not None:
         return _names_db
-    _names_db = {"en": set(), "zh": set()}
-    loc_dirs = [
-        os.path.join(REPO, "localization_eng"),
-        os.path.join(REPO, "localization_zhs"),
-    ]
-    for loc_dir in loc_dirs:
-        if not os.path.isdir(loc_dir):
-            continue
-        lang = "en" if "eng" in loc_dir else "zh"
+    _names_db = {"en": set()}
+    loc_dir = os.path.join(REPO, "localization_eng")
+    if os.path.isdir(loc_dir):
         for fname in os.listdir(loc_dir):
             if not fname.endswith(".json"):
                 continue
@@ -35,7 +29,7 @@ def load_names_db():
                     # Collect all .name, .title entries as valid game terms
                     if any(key.endswith(s) for s in [".name", ".title", ".title+"]):
                         if isinstance(val, str) and len(val) > 1:
-                            _names_db[lang].add(val.strip())
+                            _names_db["en"].add(val.strip())
             except Exception:
                 pass
     return _names_db
@@ -52,8 +46,8 @@ def check_line_count(filepath):
 def check_card_names(filepath):
     """Check that bold card/enemy names in the file exist in the game database."""
     db = load_names_db()
-    lang = "zh" if "_cn.md" in filepath else "en"
-    valid_names = db[lang]
+    lang = "en"
+    valid_names = db.get(lang)
     if not valid_names:
         return None  # Can't validate without DB
 
@@ -75,10 +69,6 @@ def check_card_names(filepath):
             "EXCEPTION", "Multi-hit cards critical", "Slippery", "SKIP",
             "NEVER", "Multi-hit", "HARD LIMIT", "Deck thinning",
             "Exhaust cards", "#1 cause of death", "Osty dies turn 1-2",
-            # CN strategy words
-            "永远的神", "你铁甲的毕业证", "纯摆设", "纯诈骗", "赌狗专用",
-            "删牌比拿牌重要", "消耗牌是隐藏的删牌", "必须R2前杀掉或虚弱药水",
-            "23血进场=必死", "252血纯靠打击/出击打不死",
         }
         if term in skip_terms:
             continue
@@ -93,17 +83,9 @@ def check_card_names(filepath):
                      for name in valid_names)
         if not found:
             # Could be a valid but unlisted term - only flag if it looks like a card name
-            # (Capitalized in EN, or 2-6 chars in CN)
-            if lang == "en" and term[0].isupper() and " " not in term:
+            # (Capitalized in EN)
+            if term[0].isupper() and " " not in term:
                 errors.append(f"  Unknown EN name: '{term}' — not in game database")
-            elif lang == "zh" and 2 <= len(term) <= 6 and not any(c.isascii() for c in term):
-                # Skip common CN commentary/slang that isn't a game name
-                cn_skip = {"纯纯陷阱", "能力牌跟上", "例外：快死了", "你要死了", "全部干了",
-                           "必拿", "通用好牌", "致命模式", "正常优先级", "关键", "顶级",
-                           "核心能力牌", "绝对不进", "临时的", "快死了", "怕什么", "无脑",
-                           "大爹", "白嫖", "陷阱", "纯坑", "必死", "速杀", "离谱"}
-                if term not in cn_skip:
-                    errors.append(f"  Unknown ZH name: '{term}' — not in game database")
 
     if errors:
         return f"WARNING: Possible hallucinated names in {os.path.basename(filepath)}:\n" + "\n".join(errors[:5])
